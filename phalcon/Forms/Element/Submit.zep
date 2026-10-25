@@ -10,23 +10,10 @@
 
 namespace Phalcon\Forms\Element;
 
-use Phalcon\Tag;
-
 /**
  * Component INPUT[type=submit] for forms
  */
 class Submit extends AbstractElement
 {
-    /**
-     * Renders the element widget
-     */
-    public function render(array attributes = []) -> string
-    {
-        /**
-         * Merged passed attributes with previously defined ones
-         */
-        return Tag::submitButton(
-            this->prepareAttributes(attributes)
-        );
-    }
+    protected string method = "inputSubmit";
 }

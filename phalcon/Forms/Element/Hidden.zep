@@ -10,22 +10,10 @@
 
 namespace Phalcon\Forms\Element;
 
-use Phalcon\Tag;
-
 /**
- * Phalcon\Forms\Element\Hidden
- *
  * Component INPUT[type=hidden] for forms
  */
 class Hidden extends AbstractElement
 {
-    /**
-     * Renders the element widget returning HTML
-     */
-    public function render(array attributes = []) -> string
-    {
-        return Tag::hiddenField(
-            this->prepareAttributes(attributes)
-        );
-    }
+    protected string method = "inputHidden";
 }

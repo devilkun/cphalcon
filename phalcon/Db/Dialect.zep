@@ -10,9 +10,36 @@
 
 namespace Phalcon\Db;
 
+use Phalcon\Contracts\Db\DbTypes;
+use Phalcon\Db\Exceptions\ConflictTargetColumnRequired;
+use Phalcon\Db\Exceptions\ConflictUpdateColumnRequired;
+use Phalcon\Db\Exceptions\InvalidGroupByExpression;
+use Phalcon\Db\Exceptions\InvalidListExpression;
+use Phalcon\Db\Exceptions\InvalidOrderByExpression;
+use Phalcon\Db\Exceptions\InvalidSqlExpression;
+use Phalcon\Db\Exceptions\InvalidSqlExpressionType;
+use Phalcon\Db\Exceptions\InvalidUnaryExpression;
+use Phalcon\Db\Exceptions\MaterializedViewsNotSupported;
+use Phalcon\Db\Exceptions\MissingDefinitionKey;
+use Phalcon\Db\Exceptions\ReturningNotSupported;
+use Phalcon\Db\Exceptions\UnsupportedOperator;
+use Phalcon\Support\Settings;
+
 /**
  * This is the base class to each database dialect. This implements
  * common methods to transform intermediate code into its RDBMS related syntax
+ *
+ * @phpstan-import-type db_bind_counts from DbTypes
+ * @phpstan-import-type db_column_list from DbTypes
+ * @phpstan-import-type db_column_names from DbTypes
+ * @phpstan-import-type db_custom_functions from DbTypes
+ * @phpstan-import-type db_expression from DbTypes
+ * @phpstan-import-type db_joins from DbTypes
+ * @phpstan-import-type db_limit_expression from DbTypes
+ * @phpstan-import-type db_limit_number from DbTypes
+ * @phpstan-import-type db_select_definition from DbTypes
+ * @phpstan-import-type db_table_name from DbTypes
+ * @phpstan-import-type db_view_definition from DbTypes
  */
 abstract class Dialect implements DialectInterface
 {
@@ -23,13 +50,35 @@ abstract class Dialect implements DialectInterface
 
     /**
      * @var array
+     *
+     * @phpstan-var db_custom_functions
      */
     protected customFunctions = [];
 
     /**
+     * Dialect-specific operators that a concrete dialect must opt into
+     * via supportedOperators; using one elsewhere throws.
+     *
+     * @var array
+     *
+     * @phpstan-var list<string>
+     */
+    protected guardedOperators = ["@@", "@>", "<@", "&&", "||", "->", "->>", "#>", "#>>"];
+
+    /**
+     * Subset of guardedOperators that this dialect emits. Overridden per
+     * dialect.
+     *
+     * @var array
+     *
+     * @phpstan-var list<string>
+     */
+    protected supportedOperators = [];
+
+    /**
      * Generate SQL to create a new savepoint
      */
-    public function createSavepoint(string! name) -> string
+    public function createSavepoint(string name) -> string
     {
         return "SAVEPOINT " . name;
     }
@@ -37,11 +86,11 @@ abstract class Dialect implements DialectInterface
     /**
      * Escape identifiers
      */
-    final public function escape(string! str, string escapeChar = null) -> string
+    final public function escape(string str, string escapeChar = null) -> string
     {
-        var parts, key, part, newParts;
+        var parts, key, part, newParts, trimmed;
 
-        if !globals_get("db.escape_identifiers") {
+        if !Settings::get("db.escape_identifiers") {
             return str;
         }
 
@@ -57,7 +106,25 @@ abstract class Dialect implements DialectInterface
             return str;
         }
 
-        let parts = (array) explode(".", trim(str, escapeChar));
+        let trimmed = trim(str, escapeChar);
+
+        /**
+         * A name with no escape character, no "*" and no empty part: put the
+         * escape character on the two sides of each part with one
+         * str_replace(). The result is the same as the result of the loop
+         * below, and no array is necessary.
+         */
+        if escapeChar != "" &&
+            trimmed !== "" &&
+            !memstr(trimmed, escapeChar) &&
+            !memstr(trimmed, "*") &&
+            !memstr(trimmed, "..") &&
+            !starts_with(trimmed, ".") &&
+            !ends_with(trimmed, ".") {
+            return escapeChar . str_replace(".", escapeChar . "." . escapeChar, trimmed) . escapeChar;
+        }
+
+        let parts = (array) explode(".", trimmed);
 
         let newParts = parts;
 
@@ -75,9 +142,9 @@ abstract class Dialect implements DialectInterface
     /**
      * Escape Schema
      */
-    final public function escapeSchema(string! str, string escapeChar = null) -> string
+    final public function escapeSchema(string str, string escapeChar = null) -> string
     {
-        if !globals_get("db.escape_identifiers") {
+        if !Settings::get("db.escape_identifiers") {
             return str;
         }
 
@@ -89,16 +156,32 @@ abstract class Dialect implements DialectInterface
     }
 
     /**
-     * Returns a SQL modified with a FOR UPDATE clause
+     * Returns a SQL modified with a FOR UPDATE clause. The optional `modifier`
+     * appends a row-lock disposition keyword.
      *
      *```php
-     * $sql = $dialect->forUpdate("SELECT * FROM robots");
+     * $sql = $dialect->forUpdate("SELECT * FROM co_invoices");
+     * echo $sql; // SELECT * FROM co_invoices FOR UPDATE
      *
-     * echo $sql; // SELECT * FROM robots FOR UPDATE
+     * $sql = $dialect->forUpdate(
+     *     "SELECT * FROM co_invoices",
+     *     Dialect::LOCK_NOWAIT
+     * );
+     * echo $sql; // SELECT * FROM co_invoices FOR UPDATE NOWAIT
+     *
+     * $sql = $dialect->forUpdate(
+     *     "SELECT * FROM co_invoices",
+     *     Dialect::LOCK_SKIP_LOCKED
+     * );
+     * echo $sql; // SELECT * FROM co_invoices FOR UPDATE SKIP LOCKED
      *```
      */
-    public function forUpdate(string! sqlQuery) -> string
+    public function forUpdate(string sqlQuery, string modifier = "") -> string
     {
+        if modifier !== "" {
+            return sqlQuery . " FOR UPDATE " . modifier;
+        }
+
         return sqlQuery . " FOR UPDATE";
     }
 
@@ -113,8 +196,11 @@ abstract class Dialect implements DialectInterface
      *     ]
      * );
      * ```
+     *
+     * @phpstan-param db_column_list $columnList
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final public function getColumnList(array! columnList, string escapeChar = null, array! bindCounts = []) -> string
+    final public function getColumnList(array columnList, string escapeChar = null,  array bindCounts = []) -> string
     {
         var column;
         array columns;
@@ -130,6 +216,8 @@ abstract class Dialect implements DialectInterface
 
     /**
      * Returns registered functions
+     *
+     * @phpstan-return db_custom_functions
      */
     public function getCustomFunctions() -> array
     {
@@ -139,15 +227,13 @@ abstract class Dialect implements DialectInterface
     /**
      * Resolve Column expressions
      *
-     * @param array|string column
-     * @param string|null escapeChar
-     * @param array bindCounts
-     *
-     * @return string
+     * @phpstan-param db_expression  $column
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final public function getSqlColumn(var column, string escapeChar = null, array! bindCounts = []) -> string
+    final public function getSqlColumn(var column, string escapeChar = null,  array bindCounts = []) -> string
     {
-        var columnExpression, columnAlias, columnField, columnDomain;
+        var columnExpression = null,
+            columnAlias, columnField, columnDomain, columnSql;
 
         if typeof column !== "array" {
             return this->prepareQualified(column, null, escapeChar);
@@ -169,10 +255,38 @@ abstract class Dialect implements DialectInterface
                     "type": "all"
                 ];
             } else {
-                let columnExpression = [
-                    "type": "qualified",
-                    "name": columnField
-                ];
+                /**
+                 * A plain column. prepareQualified() gives the same SQL as
+                 * getSqlExpression() for a "qualified" expression. Thus, no
+                 * expression array is necessary.
+                 *
+                 * The index "1" is the domain column. An empty domain is no
+                 * domain.
+                 */
+                fetch columnDomain, column[1];
+
+                if columnDomain === "" {
+                    let columnDomain = null;
+                }
+
+                let columnSql = this->prepareQualified(
+                    columnField,
+                    columnDomain,
+                    escapeChar
+                );
+
+                /**
+                 * The index "2" is the column alias
+                 */
+                if fetch columnAlias, column[2] && columnAlias {
+                    return this->prepareColumnAlias(columnSql, columnAlias, escapeChar);
+                }
+
+                /**
+                 * With no alias, prepareColumnAlias() returns the SQL
+                 * unchanged
+                 */
+                return columnSql;
             }
 
             /**
@@ -195,7 +309,7 @@ abstract class Dialect implements DialectInterface
         /**
          * Resolve column expressions
          */
-        let column = this->getSqlExpression(
+        let columnSql = this->getSqlExpression(
             columnExpression,
             escapeChar,
             bindCounts
@@ -205,23 +319,29 @@ abstract class Dialect implements DialectInterface
          * Escape alias and concatenate to value SQL
          */
         if fetch columnAlias, columnExpression["sqlAlias"] || fetch columnAlias, columnExpression["alias"] {
-            return this->prepareColumnAlias(column, columnAlias, escapeChar);
+            return this->prepareColumnAlias(columnSql, columnAlias, escapeChar);
         }
 
-        return this->prepareColumnAlias(column, null, escapeChar);
+        /**
+         * With no alias, prepareColumnAlias() returns the SQL unchanged
+         */
+        return columnSql;
     }
 
     /**
      * Transforms an intermediate representation for an expression into a database system valid expression
+     *
+     * @phpstan-param db_expression  $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    public function getSqlExpression(array! expression, string escapeChar = null, array! bindCounts = []) -> string
+    public function getSqlExpression(array expression, string escapeChar = null,  array bindCounts = []) -> string
     {
         int i;
-        var type, times, postTimes, rawValue, value;
+        var type, times, postTimes, rawValue, value, nestedDefinition;
         array placeholders;
 
         if unlikely !fetch type, expression["type"] {
-            throw new Exception("Invalid SQL expression");
+            throw new InvalidSqlExpression();
         }
 
         switch type {
@@ -255,6 +375,12 @@ abstract class Dialect implements DialectInterface
              * Resolve literal OR placeholder expressions
              */
             case "literal":
+                if isset expression["escape"] && expression["escape"] {
+                    return "'"
+                        . this->escapeStringLiteral(expression["value"])
+                        . "'";
+                }
+
                 return expression["value"];
 
             case "placeholder":
@@ -331,9 +457,20 @@ abstract class Dialect implements DialectInterface
 
             /**
              * Resolve SELECT
+             *
+             * Propagate the outer bindCounts into the nested SELECT
+             * definition so that array placeholders inside a sub-select
+             * are re-expanded against the current bind values instead of
+             * the parse-time `times` baked into the cached irPhql. The
+             * local copy avoids mutating the cached intermediate. See
+             * issue #17004.
              */
             case "select":
-                return "(" . this->select(expression["value"]) . ")";
+                let nestedDefinition = expression["value"];
+                if !empty bindCounts {
+                    let nestedDefinition["bindCounts"] = bindCounts;
+                }
+                return "(" . this->select(nestedDefinition) . ")";
 
             /**
              * Resolve CAST of values
@@ -366,12 +503,14 @@ abstract class Dialect implements DialectInterface
         /**
          * Expression type wasn't found
          */
-        throw new Exception("Invalid SQL expression type '" . type . "'");
+        throw new InvalidSqlExpressionType(type);
     }
 
     /**
      * Transform an intermediate representation of a schema/table into a
      * database system valid expression
+     *
+     * @phpstan-param db_table_name $table
      */
     final public function getSqlTable(var table, string escapeChar = null) -> string
     {
@@ -409,38 +548,64 @@ abstract class Dialect implements DialectInterface
      * Generates the SQL for LIMIT clause
      *
      * ```php
-     * // SELECT * FROM robots LIMIT 10
+     * // SELECT * FROM co_invoices LIMIT 10
      * echo $dialect->limit(
-     *     "SELECT * FROM robots",
+     *     "SELECT * FROM co_invoices",
      *     10
      * );
      *
-     * // SELECT * FROM robots LIMIT 10 OFFSET 50
+     * // SELECT * FROM co_invoices LIMIT 10 OFFSET 50
      * echo $dialect->limit(
-     *     "SELECT * FROM robots",
+     *     "SELECT * FROM co_invoices",
      *     [10, 50]
      * );
      * ```
+     *
+     * @phpstan-param db_limit_number $number
      */
-    public function limit(string! sqlQuery, var number) -> string
+    public function limit(string sqlQuery, var number) -> string
     {
+        /**
+         * A bound placeholder (":name" / "?N") is emitted unchanged so it can
+         * be bound by PDO; any other value is coerced to an integer, so a
+         * request-derived pagination value reaching this low-level API cannot
+         * inject SQL.
+         */
         if typeof number == "array" {
-            let sqlQuery .= " LIMIT " . number[0];
+            let sqlQuery .= " LIMIT " . this->getLimitValue(number[0]);
 
             if isset number[1] && strlen(number[1]) {
-                let sqlQuery .= " OFFSET " . number[1];
+                let sqlQuery .= " OFFSET " . this->getLimitValue(number[1]);
             }
 
             return sqlQuery;
         }
 
-        return sqlQuery . " LIMIT " . number;
+        return sqlQuery . " LIMIT " . this->getLimitValue(number);
+    }
+
+    /**
+     * Renders a LIMIT/OFFSET value: a bound placeholder passes through, any
+     * other value is coerced to an integer to prevent SQL injection.
+     */
+    protected function getLimitValue(var value) -> string
+    {
+        if (
+            typeof value == "string" &&
+            (substr(value, 0, 1) === ":" || substr(value, 0, 1) === "?")
+        ) {
+            return value;
+        }
+
+        let value = (int) value;
+
+        return (string) value;
     }
 
     /**
      * Registers custom SQL functions
      */
-    public function registerCustomFunction(string name, callable customFunction) -> <Dialect>
+    public function registerCustomFunction(string name, callable customFunction) -> <static>
     {
         let this->customFunctions[name] = customFunction;
 
@@ -448,9 +613,88 @@ abstract class Dialect implements DialectInterface
     }
 
     /**
+     * Generates SQL to create a materialized view. Supported by PostgreSQL
+     * (`CREATE MATERIALIZED VIEW name AS <sql>`). Other dialects inherit
+     * this throw - MySQL and SQLite have no materialized-view concept.
+     *
+     * @phpstan-param db_view_definition $definition
+     */
+    public function createMaterializedView(string viewName,  array definition, string schemaName = null) -> string
+    {
+        throw new MaterializedViewsNotSupported();
+    }
+
+    /**
+     * Generates SQL to drop a materialized view. Supported by PostgreSQL.
+     */
+    public function dropMaterializedView(string viewName, string schemaName = null, bool ifExists = true) -> string
+    {
+        throw new MaterializedViewsNotSupported();
+    }
+
+    /**
+     * Generates SQL to refresh a materialized view. Supported by
+     * PostgreSQL. Pass `concurrent = true` for `REFRESH MATERIALIZED VIEW
+     * CONCURRENTLY ...`, which avoids blocking concurrent SELECTs (requires
+     * the view to have a unique index).
+     */
+    public function refreshMaterializedView(string viewName, string schemaName = null, bool concurrent = false) -> string
+    {
+        throw new MaterializedViewsNotSupported();
+    }
+
+    /**
+     * Appends an `ON CONFLICT (col, ...) DO UPDATE SET col = excluded.col`
+     * upsert clause to the supplied INSERT statement. The syntax is the
+     * SQL standard form recognized by PostgreSQL (9.5+) and SQLite (3.24+).
+     * MySQL overrides this method to throw because its `ON DUPLICATE KEY
+     * UPDATE` has a different shape (deferred to parser item #23).
+     *
+     * @phpstan-param db_column_names $conflictColumns
+     * @phpstan-param db_column_names $updateColumns
+     */
+    public function onConflictUpdate(string sqlQuery,  array conflictColumns,  array updateColumns) -> string
+    {
+        var col;
+        array assignments;
+
+        if unlikely empty conflictColumns {
+            throw new ConflictTargetColumnRequired();
+        }
+
+        if unlikely empty updateColumns {
+            throw new ConflictUpdateColumnRequired();
+        }
+
+        let assignments = [];
+        for col in updateColumns {
+            let assignments[] = this->escape((string) col)
+                . " = excluded." . this->escape((string) col);
+        }
+
+        return sqlQuery
+            . " ON CONFLICT (" . this->getColumnList(conflictColumns) . ")"
+            . " DO UPDATE SET " . implode(", ", assignments);
+    }
+
+    /**
+     * Returns a SQL statement extended with a `RETURNING` clause so the
+     * INSERT/UPDATE/DELETE returns rows. Supported by PostgreSQL and
+     * SQLite 3.35+. Pass `["*"]` for `RETURNING *`, or a list of column
+     * names. The base implementation throws - MySQL inherits it because
+     * MySQL has no RETURNING construct.
+     *
+     * @phpstan-param db_column_names $columns
+     */
+    public function returning(string sqlQuery,  array columns) -> string
+    {
+        throw new ReturningNotSupported();
+    }
+
+    /**
      * Generate SQL to release a savepoint
      */
-    public function releaseSavepoint(string! name) -> string
+    public function releaseSavepoint(string name) -> string
     {
         return "RELEASE SAVEPOINT " . name;
     }
@@ -458,29 +702,28 @@ abstract class Dialect implements DialectInterface
     /**
      * Generate SQL to rollback a savepoint
      */
-    public function rollbackSavepoint(string! name) -> string
+    public function rollbackSavepoint(string name) -> string
     {
         return "ROLLBACK TO SAVEPOINT " . name;
     }
 
     /**
      * Builds a SELECT statement
+     *
+     * @phpstan-param db_select_definition $definition
      */
-    public function select(array! definition) -> string
+    public function select(array definition) -> string
     {
         var tables, columns, sql, distinct, joins, where, escapeChar, groupBy,
             having, orderBy, limit, forUpdate, bindCounts;
+        array parts;
 
         if unlikely !fetch tables, definition["tables"] {
-            throw new Exception(
-                "The index 'tables' is required in the definition array"
-            );
+            throw new MissingDefinitionKey("tables");
         }
 
         if unlikely !fetch columns, definition["columns"] {
-            throw new Exception(
-                "The index 'columns' is required in the definition array"
-            );
+            throw new MissingDefinitionKey("columns");
         }
 
         if fetch distinct, definition["distinct"] {
@@ -501,49 +744,38 @@ abstract class Dialect implements DialectInterface
         let escapeChar = this->escapeChar;
 
         /**
-         * Resolve COLUMNS
+         * Accumulate the top-level clauses in an array and join once.
+         * Each segment is appended without a leading space; implode adds
+         * the separator. The conditional LIMIT / FOR UPDATE tails are
+         * handled after the join because LIMIT wraps the assembled SQL.
          */
-        let sql .= " " . this->getColumnList(columns, escapeChar, bindCounts);
+        let parts = [
+            sql,
+            this->getColumnList(columns, escapeChar, bindCounts),
+            this->getSqlExpressionFrom(tables, escapeChar)
+        ];
 
-        /**
-         * Resolve FROM
-         */
-        let sql .= " " . this->getSqlExpressionFrom(tables, escapeChar);
-
-        /**
-         * Resolve JOINs
-         */
         if fetch joins, definition["joins"] && joins {
-            let sql .= " " . this->getSqlExpressionJoins(definition["joins"], escapeChar, bindCounts);
+            let parts[] = this->getSqlExpressionJoins(definition["joins"], escapeChar, bindCounts);
         }
 
-        /**
-         * Resolve WHERE
-         */
         if fetch where, definition["where"] && where {
-            let sql .= " " . this->getSqlExpressionWhere(where, escapeChar, bindCounts);
+            let parts[] = this->getSqlExpressionWhere(where, escapeChar, bindCounts);
         }
 
-        /**
-         * Resolve GROUP BY
-         */
         if fetch groupBy, definition["group"] && groupBy {
-            let sql .= " " . this->getSqlExpressionGroupBy(groupBy, escapeChar);
+            let parts[] = this->getSqlExpressionGroupBy(groupBy, escapeChar);
         }
 
-        /**
-         * Resolve HAVING
-         */
         if fetch having, definition["having"] && having {
-            let sql .= " " . this->getSqlExpressionHaving(having, escapeChar, bindCounts);
+            let parts[] = this->getSqlExpressionHaving(having, escapeChar, bindCounts);
         }
 
-        /**
-         * Resolve ORDER BY
-         */
         if fetch orderBy, definition["order"] && orderBy {
-            let sql .= " " . this->getSqlExpressionOrderBy(orderBy, escapeChar, bindCounts);
+            let parts[] = this->getSqlExpressionOrderBy(orderBy, escapeChar, bindCounts);
         }
+
+        let sql = implode(" ", parts);
 
         /**
          * Resolve LIMIT
@@ -583,6 +815,55 @@ abstract class Dialect implements DialectInterface
     public function supportsReleaseSavepoints() -> bool
     {
         return this->supportsSavePoints();
+    }
+
+    /**
+     * Checks whether the platform supports the full `ALTER TABLE` matrix:
+     * modifying existing columns and adding or dropping foreign keys, primary
+     * keys, and check constraints. SQLite returns false - those operations
+     * throw a dedicated `Sqlite*NotSupported` exception there (basic
+     * `ADD COLUMN` remains available).
+     */
+    public function supportsAlterTable() -> bool
+    {
+        return true;
+    }
+
+    /**
+     * Checks whether the platform supports materialized views. Only PostgreSQL
+     * returns true; `createMaterializedView()` throws on the other dialects.
+     */
+    public function supportsMaterializedViews() -> bool
+    {
+        return false;
+    }
+
+    /**
+     * Checks whether the platform supports the `ON CONFLICT (...) DO UPDATE`
+     * upsert clause. MySQL returns false; `onConflictUpdate()` throws there.
+     */
+    public function supportsOnConflictUpdate() -> bool
+    {
+        return true;
+    }
+
+    /**
+     * Checks whether the platform supports the `RETURNING` clause. MySQL
+     * returns false; `returning()` throws there.
+     */
+    public function supportsReturning() -> bool
+    {
+        return false;
+    }
+
+    /**
+     * Escape a string literal for a single quoted SQL string. The standard
+     * way doubles the single quotes. A dialect where the backslash is an
+     * escape character must override this method.
+     */
+    protected function escapeStringLiteral(string value) -> string
+    {
+        return str_replace("'", "''", value);
     }
 
     /**
@@ -626,9 +907,130 @@ abstract class Dialect implements DialectInterface
     }
 
     /**
-     * Resolve *
+     * Builds a CHECK constraint clause from a `CheckInterface`, using the
+     * provided escape character for the constraint name (so each dialect
+     * gets its native quoting). Returns the clause body - the dialect's
+     * `createTable()` / `addCheck()` is expected to prefix `ADD` or place
+     * the result on its own line as appropriate.
      */
-    final protected function getSqlExpressionAll(array! expression, string escapeChar = null) -> string
+    protected function getCheckClause(<CheckInterface> check, string escapeChar = "`") -> string
+    {
+        var name;
+        string clause;
+
+        let name = check->getName();
+
+        let clause = "";
+        if name !== "" {
+            let clause = "CONSTRAINT " . escapeChar . name . escapeChar . " ";
+        }
+
+        let clause .= "CHECK (" . check->getExpression() . ")";
+
+        return clause;
+    }
+
+    /**
+     * Builds the per-index parenthesized column list, honoring per-column
+     * sort directions when the index declares any. Returns the bare
+     * comma-separated `getColumnList()` output when no directions are set,
+     * preserving the legacy rendering exactly. When directions are set,
+     * each column is followed by ` ASC` or ` DESC`; trailing positions
+     * absent from the directions array default to `ASC`.
+     */
+    protected function getIndexColumnList(<IndexInterface> index, bool wrapExpressions = true) -> string
+    {
+        var columns, directions, parts, i, column, direction, upper, rendered;
+        bool hasExpression;
+
+        let columns       = index->getColumns();
+        let directions    = index->getDirections();
+        let hasExpression = false;
+
+        for column in columns {
+            if typeof column == "object" && column instanceof RawValue {
+                let hasExpression = true;
+                break;
+            }
+        }
+
+        /**
+         * Fast path: no expressions and no directions - return the legacy
+         * `getColumnList()` rendering verbatim so existing tests and call
+         * sites see no diff.
+         */
+        if !hasExpression && empty directions {
+            return this->getColumnList(columns);
+        }
+
+        let parts = [],
+            i     = 0;
+
+        for column in columns {
+            if typeof column == "object" && column instanceof RawValue {
+                if wrapExpressions {
+                    let rendered = "(" . column->getValue() . ")";
+                } else {
+                    let rendered = column->getValue();
+                }
+            } else {
+                let rendered = this->escape(column);
+            }
+
+            if !empty directions {
+                if fetch direction, directions[i] {
+                    let upper = strtoupper((string) direction);
+
+                    if upper == "DESC" {
+                        let rendered .= " DESC";
+                    } else {
+                        let rendered .= " ASC";
+                    }
+                } else {
+                    let rendered .= " ASC";
+                }
+            }
+
+            let parts[] = rendered;
+            let i      = i + 1;
+        }
+
+        return implode(", ", parts);
+    }
+
+    /**
+     * Builds the `GENERATED ALWAYS AS (<expr>) VIRTUAL|STORED` clause for a
+     * generated/computed column. Returns an empty string when the column is
+     * not generated. When `forceStored` is `true` the clause is always emitted
+     * as `STORED` regardless of the column's `isGenerationStored()` flag -
+     * PostgreSQL uses this since it only supports stored generated columns.
+     */
+    protected function getGeneratedClause(<ColumnInterface> column, bool forceStored = false) -> string
+    {
+        var expression;
+        string storage;
+
+        if !column->isGenerated() {
+            return "";
+        }
+
+        let expression = column->getGenerationExpression();
+
+        if forceStored || column->isGenerationStored() {
+            let storage = "STORED";
+        } else {
+            let storage = "VIRTUAL";
+        }
+
+        return " GENERATED ALWAYS AS (" . expression . ") " . storage;
+    }
+
+    /**
+     * Resolve *
+     *
+     * @phpstan-param db_expression $expression
+     */
+    final protected function getSqlExpressionAll(array expression, string escapeChar = null) -> string
     {
         var domain;
 
@@ -645,10 +1047,19 @@ abstract class Dialect implements DialectInterface
      * @param array bindCounts
      *
      * @return string
+     *
+     * @phpstan-param db_expression $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final protected function getSqlExpressionBinaryOperations(array! expression, string escapeChar = null, array! bindCounts = []) -> string
+    final protected function getSqlExpressionBinaryOperations(array expression, string escapeChar = null,  array bindCounts = []) -> string
     {
-        var left, right;
+        var left, right, operator;
+
+        let operator = expression["op"];
+
+        if in_array(operator, this->guardedOperators) && !in_array(operator, this->supportedOperators) {
+            throw new UnsupportedOperator(operator);
+        }
 
         let left  = this->getSqlExpression(
             expression["left"],
@@ -662,7 +1073,7 @@ abstract class Dialect implements DialectInterface
             bindCounts
         );
 
-        return left . " " . expression["op"] . " " . right;
+        return left . " " . operator . " " . right;
     }
 
     /**
@@ -673,15 +1084,20 @@ abstract class Dialect implements DialectInterface
      * @param array bindCounts
      *
      * @return string
+     *
+     * @phpstan-param db_expression $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final protected function getSqlExpressionCase(array! expression, string escapeChar = null, array! bindCounts = []) -> string
+    final protected function getSqlExpressionCase(array expression, string escapeChar = null,  array bindCounts = []) -> string
     {
-        var whenClause;
+        var whenClause, whenClauses;
         string sql;
 
         let sql = "CASE " . this->getSqlExpression(expression["expr"], escapeChar, bindCounts);
 
-        for whenClause in expression["when-clauses"] {
+        let whenClauses = array_values(expression["when-clauses"]);
+
+        for whenClause in whenClauses {
             if whenClause["type"] == "when" {
                 let sql .= " WHEN " .
                         this->getSqlExpression(whenClause["expr"], escapeChar, bindCounts) .
@@ -703,8 +1119,11 @@ abstract class Dialect implements DialectInterface
      * @param array bindCounts
      *
      * @return string
+     *
+     * @phpstan-param db_expression $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final protected function getSqlExpressionCastValue(array! expression, string escapeChar = null, array! bindCounts = []) -> string
+    final protected function getSqlExpressionCastValue(array expression, string escapeChar = null,  array bindCounts = []) -> string
     {
         var left, right;
 
@@ -731,8 +1150,11 @@ abstract class Dialect implements DialectInterface
      * @param array bindCounts
      *
      * @return string
+     *
+     * @phpstan-param db_expression $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final protected function getSqlExpressionConvertValue(array! expression, string escapeChar = null, array! bindCounts = []) -> string
+    final protected function getSqlExpressionConvertValue(array expression, string escapeChar = null,  array bindCounts = []) -> string
     {
         var left, right;
 
@@ -753,6 +1175,8 @@ abstract class Dialect implements DialectInterface
 
     /**
      * Resolve a FROM clause
+     *
+     * @phpstan-param array<array-key, db_table_name>|string $expression
      */
     final protected function getSqlExpressionFrom(var expression, string escapeChar = null) -> string
     {
@@ -781,8 +1205,11 @@ abstract class Dialect implements DialectInterface
      * @param array bindCounts
      *
      * @return string
+     *
+     * @phpstan-param db_expression $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final protected function getSqlExpressionFunctionCall(array! expression, string escapeChar = null, array! bindCounts = []) -> string
+    final protected function getSqlExpressionFunctionCall(array expression, string escapeChar = null,  array bindCounts = []) -> string
     {
         var name, customFunction, arguments;
 
@@ -821,8 +1248,11 @@ abstract class Dialect implements DialectInterface
      * @param array bindCounts
      *
      * @return string
+     *
+     * @phpstan-param array<array-key, mixed>|string $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final protected function getSqlExpressionGroupBy(var expression, string escapeChar = null, array! bindCounts = []) -> string
+    final protected function getSqlExpressionGroupBy(var expression, string escapeChar = null,  array bindCounts = []) -> string
     {
         var field, fields;
 
@@ -831,7 +1261,7 @@ abstract class Dialect implements DialectInterface
 
             for field in expression {
                 if unlikely typeof field != "array" {
-                    throw new Exception("Invalid SQL-GROUP-BY expression");
+                    throw new InvalidGroupByExpression();
                 }
 
                 let fields[] = this->getSqlExpression(
@@ -857,8 +1287,11 @@ abstract class Dialect implements DialectInterface
      * @param array bindCounts
      *
      * @return string
+     *
+     * @phpstan-param db_expression $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final protected function getSqlExpressionHaving(array! expression, string escapeChar = null, array! bindCounts = []) -> string
+    final protected function getSqlExpressionHaving(array expression, string escapeChar = null,  array bindCounts = []) -> string
     {
         return "HAVING " . this->getSqlExpression(expression, escapeChar, bindCounts);
     }
@@ -871,8 +1304,11 @@ abstract class Dialect implements DialectInterface
      * @param array bindCounts
      *
      * @return string
+     *
+     * @phpstan-param db_joins $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final protected function getSqlExpressionJoins(var expression, string escapeChar = null, array! bindCounts = []) -> string
+    final protected function getSqlExpressionJoins(var expression, string escapeChar = null,  array bindCounts = []) -> string
     {
         var condition, join, joinCondition, joinTable, joinType = "",
             joinConditionsArray;
@@ -926,8 +1362,11 @@ abstract class Dialect implements DialectInterface
      * @param array bindCounts
      *
      * @return string
+     *
+     * @phpstan-param db_limit_expression $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final protected function getSqlExpressionLimit(var expression, string escapeChar = null, array! bindCounts = []) -> string
+    final protected function getSqlExpressionLimit(var expression, string escapeChar = null,  array bindCounts = []) -> string
     {
         var sql = "", value, limit, offset = null;
 
@@ -974,8 +1413,11 @@ abstract class Dialect implements DialectInterface
      * @param array bindCounts
      *
      * @return string
+     *
+     * @phpstan-param db_expression $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final protected function getSqlExpressionList(array! expression, string escapeChar = null, array! bindCounts = []) -> string
+    final protected function getSqlExpressionList(array expression, string escapeChar = null,  array bindCounts = []) -> string
     {
         var item, values, separator;
         array items;
@@ -1000,7 +1442,7 @@ abstract class Dialect implements DialectInterface
             return "(" . join(separator, items) . ")";
         }
 
-        throw new Exception("Invalid SQL-list expression");
+        throw new InvalidListExpression();
     }
 
     /**
@@ -1011,8 +1453,11 @@ abstract class Dialect implements DialectInterface
      * @param array bindCounts
      *
      * @return string
+     *
+     * @phpstan-param db_expression $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final protected function getSqlExpressionObject(array! expression, string escapeChar = null, array! bindCounts = []) -> string
+    final protected function getSqlExpressionObject(array expression, string escapeChar = null,  array bindCounts = []) -> string
     {
         var domain = null, objectExpression;
 
@@ -1035,8 +1480,11 @@ abstract class Dialect implements DialectInterface
      * @param array bindCounts
      *
      * @return string
+     *
+     * @phpstan-param array<array-key, mixed>|string $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final protected function getSqlExpressionOrderBy(var expression, string escapeChar = null, array! bindCounts = []) -> string
+    final protected function getSqlExpressionOrderBy(var expression, string escapeChar = null,  array bindCounts = []) -> string
     {
         var field, fields, type, fieldSql = null;
 
@@ -1046,7 +1494,7 @@ abstract class Dialect implements DialectInterface
             for field in expression {
 
                 if unlikely typeof field != "array" {
-                    throw new Exception("Invalid SQL-ORDER-BY expression");
+                    throw new InvalidOrderByExpression();
                 }
 
                 let fieldSql = this->getSqlExpression(
@@ -1075,8 +1523,10 @@ abstract class Dialect implements DialectInterface
 
     /**
      * Resolve qualified expressions
+     *
+     * @phpstan-param db_expression $expression
      */
-    final protected function getSqlExpressionQualified(array! expression, string escapeChar = null) -> string
+    final protected function getSqlExpressionQualified(array expression, string escapeChar = null) -> string
     {
         var column, domain;
 
@@ -1098,8 +1548,11 @@ abstract class Dialect implements DialectInterface
      * @param array expression
      * @param string|null escapeChar
      * @param array bindCounts
+     *
+     * @phpstan-param db_expression $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final protected function getSqlExpressionScalar(array! expression, string escapeChar = null, array! bindCounts = []) -> string
+    final protected function getSqlExpressionScalar(array expression, string escapeChar = null,  array bindCounts = []) -> string
     {
         var value;
 
@@ -1108,7 +1561,7 @@ abstract class Dialect implements DialectInterface
         }
 
         if unlikely !fetch value, expression["value"] {
-            throw new Exception("Invalid SQL expression");
+            throw new InvalidSqlExpression();
         }
 
         if typeof value === "array" {
@@ -1126,8 +1579,11 @@ abstract class Dialect implements DialectInterface
      * @param array bindCounts
      *
      * @return string
+     *
+     * @phpstan-param db_expression $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final protected function getSqlExpressionUnaryOperations(array! expression, string escapeChar = null, array! bindCounts = []) -> string
+    final protected function getSqlExpressionUnaryOperations(array expression, string escapeChar = null,  array bindCounts = []) -> string
     {
         var left, right;
 
@@ -1145,7 +1601,7 @@ abstract class Dialect implements DialectInterface
             return expression["op"] . " " . this->getSqlExpression(right, escapeChar, bindCounts);
         }
 
-        throw new Exception("Invalid SQL-unary expression");
+        throw new InvalidUnaryExpression();
     }
 
     /**
@@ -1156,8 +1612,11 @@ abstract class Dialect implements DialectInterface
      * @param array bindCounts
      *
      * @return string
+     *
+     * @phpstan-param db_expression|string $expression
+     * @phpstan-param db_bind_counts $bindCounts
      */
-    final protected function getSqlExpressionWhere(var expression, string escapeChar = null, array! bindCounts = []) -> string
+    final protected function getSqlExpressionWhere(var expression, string escapeChar = null,  array bindCounts = []) -> string
     {
         var whereSql;
 
@@ -1173,7 +1632,7 @@ abstract class Dialect implements DialectInterface
     /**
      * Prepares column for this RDBMS
      */
-    protected function prepareColumnAlias(string! qualified, string alias = null, string escapeChar = null) -> string
+    protected function prepareColumnAlias(string qualified, string alias = null, string escapeChar = null) -> string
     {
         if alias != "" {
             return qualified . " AS " . this->escape(alias, escapeChar);
@@ -1185,7 +1644,7 @@ abstract class Dialect implements DialectInterface
     /**
      * Prepares table for this RDBMS
      */
-    protected function prepareTable(string! table, string schema = null, string alias = null, string escapeChar = null) -> string
+    protected function prepareTable(string table, string schema = null, string alias = null, string escapeChar = null) -> string
     {
         let table = this->escape(table, escapeChar);
 
@@ -1209,7 +1668,7 @@ abstract class Dialect implements DialectInterface
     /**
      * Prepares qualified for this RDBMS
      */
-    protected function prepareQualified(string! column, string domain = null, string escapeChar = null) -> string
+    protected function prepareQualified(string column, string domain = null, string escapeChar = null) -> string
     {
         if domain != "" {
             return this->escape(domain . "." . column, escapeChar);

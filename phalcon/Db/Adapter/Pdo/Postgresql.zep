@@ -1,8 +1,8 @@
 
 /**
- * This file is part of the Phalcon.
+ * This file is part of the Phalcon Framework.
  *
- * (c) Phalcon Team <team@phalcon.com>
+ * (c) Phalcon Team <team@phalcon.io>
  *
  * For the full copyright and license information, please view the LICENSE
  * file that was distributed with this source code.
@@ -10,11 +10,13 @@
 
 namespace Phalcon\Db\Adapter\Pdo;
 
+use Phalcon\Contracts\Db\DbTypes;
 use Phalcon\Db\Adapter\Pdo\AbstractPdo as PdoAdapter;
 use Phalcon\Db\Column;
 use Phalcon\Db\ColumnInterface;
 use Phalcon\Db\Enum;
 use Phalcon\Db\Exception;
+use Phalcon\Db\Exceptions\TableMustHaveColumn;
 use Phalcon\Db\RawValue;
 use Phalcon\Db\Reference;
 use Phalcon\Db\ReferenceInterface;
@@ -36,23 +38,22 @@ use Throwable;
  *
  * $connection = new Postgresql($config);
  * ```
+ *
+ * @phpstan-import-type db_descriptor from DbTypes
+ * @phpstan-import-type db_dsn_defaults from DbTypes
+ * @phpstan-import-type db_table_definition from DbTypes
  */
 class Postgresql extends PdoAdapter
 {
-    /**
-     * @var string
-     */
-    protected dialectType = "postgresql";
-
-    /**
-     * @var string
-     */
-    protected type = "pgsql";
+    protected string dialectType = "postgresql";
+    protected string type = "pgsql";
 
     /**
      * Constructor for Phalcon\Db\Adapter\Pdo\Postgresql
+     *
+     * @phpstan-param db_descriptor $descriptor
      */
-    public function __construct(array! descriptor)
+    public function __construct(array descriptor)
     {
         if isset descriptor["charset"] {
             trigger_error(
@@ -66,8 +67,10 @@ class Postgresql extends PdoAdapter
     /**
      * This method is automatically called in Phalcon\Db\Adapter\Pdo
      * constructor. Call it when you need to restore a database connection.
+     *
+     * @phpstan-param db_descriptor $descriptor
      */
-    public function connect(array! descriptor = []) -> void
+    public function connect(array descriptor = []) -> void
     {
         var schema, sql;
 
@@ -81,10 +84,10 @@ class Postgresql extends PdoAdapter
             let schema = null;
         }
 
-        if isset descriptor["password"] {
-            if typeof descriptor["password"] == "string" && strlen(descriptor["password"]) == 0 {
-                let descriptor["password"] = null;
-            }
+        if isset descriptor["password"] &&
+            typeof descriptor["password"] == "string" &&
+            strlen(descriptor["password"]) == 0 {
+            let descriptor["password"] = null;
         }
 
         parent::connect(descriptor);
@@ -98,17 +101,19 @@ class Postgresql extends PdoAdapter
 
     /**
      * Creates a table
+     *
+     * @phpstan-param db_table_definition $definition
      */
-    public function createTable(string! tableName, string! schemaName, array! definition) -> bool
+    public function createTable(string tableName,  string schemaName,  array definition) -> bool
     {
         var sql, queries, query, exception, columns;
 
         if unlikely !fetch columns, definition["columns"] {
-            throw new Exception("The table must contain at least one column");
+            throw new TableMustHaveColumn();
         }
 
-        if unlikely !count(columns) {
-            throw new Exception("The table must contain at least one column");
+        if unlikely empty columns {
+            throw new TableMustHaveColumn();
         }
 
         let sql = this->dialect->createTable(tableName, schemaName, definition);
@@ -152,14 +157,16 @@ class Postgresql extends PdoAdapter
     public function describeColumns(string table, string schema = null) -> <ColumnInterface[]>
     {
         var columns, columnType, fields, field, definition, oldColumn,
-            columnName, charSize, numericSize, numericScale;
+            columnName, charSize, numericSize, numericScale, isGenerated,
+            generationExpression;
 
         let oldColumn = null, columns = [];
 
         /**
          * We're using FETCH_NUM to fetch the columns
-         * 0:name, 1:type, 2:size, 3:numericsize, 4: numericscale, 5: null,
-         * 6: key, 7: extra, 8: position, 9 default
+         *   0:name, 1:type, 2:size, 3:numericsize, 4:numericscale, 5:null,
+         *   6:key, 7:extra, 8:position, 9:default, 10:comment,
+         *   11:is_generated, 12:generation_expression
          */
         let fields = this->fetchAll(
             this->dialect->describeColumns(table, schema),
@@ -452,8 +459,73 @@ class Postgresql extends PdoAdapter
                  * UUID
                  */
                 case memstr(columnType, "uuid"):
-                    let definition["type"] = Column::TYPE_CHAR,
-                        definition["size"] = 36;
+                    let definition["type"] = Column::TYPE_UUID;
+
+                    break;
+
+                /**
+                 * BYTEA
+                 */
+                case memstr(columnType, "bytea"):
+                    let definition["type"] = Column::TYPE_BYTEA;
+
+                    break;
+
+                /**
+                 * INET
+                 */
+                case memstr(columnType, "inet"):
+                    let definition["type"] = Column::TYPE_INET;
+
+                    break;
+
+                /**
+                 * CIDR
+                 */
+                case memstr(columnType, "cidr"):
+                    let definition["type"] = Column::TYPE_CIDR;
+
+                    break;
+
+                /**
+                 * MACADDR
+                 */
+                case memstr(columnType, "macaddr"):
+                    let definition["type"] = Column::TYPE_MACADDR;
+
+                    break;
+
+                /**
+                 * Range types - order matters: more-specific names first
+                 * (`tstzrange` before `tsrange`, etc.).
+                 */
+                case memstr(columnType, "int4range"):
+                    let definition["type"] = Column::TYPE_INT4RANGE;
+
+                    break;
+
+                case memstr(columnType, "int8range"):
+                    let definition["type"] = Column::TYPE_INT8RANGE;
+
+                    break;
+
+                case memstr(columnType, "numrange"):
+                    let definition["type"] = Column::TYPE_NUMRANGE;
+
+                    break;
+
+                case memstr(columnType, "tstzrange"):
+                    let definition["type"] = Column::TYPE_TSTZRANGE;
+
+                    break;
+
+                case memstr(columnType, "tsrange"):
+                    let definition["type"] = Column::TYPE_TSRANGE;
+
+                    break;
+
+                case memstr(columnType, "daterange"):
+                    let definition["type"] = Column::TYPE_DATERANGE;
 
                     break;
 
@@ -464,6 +536,17 @@ class Postgresql extends PdoAdapter
                     let definition["type"] = Column::TYPE_VARCHAR;
 
                     break;
+            }
+
+            /**
+             * Detect PostgreSQL array types. `data_type` reads `ARRAY` for
+             * array columns; in that case we still need the inner type
+             * (already captured above via the `columnType` switch on the
+             * element type's name when present in `udt_name` patterns), but
+             * for `information_schema.data_type == ARRAY` we just flag it.
+             */
+            if memstr(columnType, "ARRAY") || memstr(columnType, "[]") {
+                let definition["array"] = true;
             }
 
             /**
@@ -490,24 +573,45 @@ class Postgresql extends PdoAdapter
             }
 
             /**
-             * Check if the column is auto increment
+             * Detect a generated/computed column. PostgreSQL only supports
+             * STORED. `is_generated` is the string 'ALWAYS' for generated
+             * columns and 'NEVER' otherwise.
              */
-            if field[7] == "auto_increment" {
-                let definition["autoIncrement"] = true;
+            let isGenerated = false;
+            if isset field[11] {
+                let isGenerated = (field[11] === "ALWAYS");
             }
 
-            /**
-             * Check if the column has default values
-             */
-            if field[9] !== null {
-                let definition["default"] = preg_replace(
-                    "/^'|'?::[[:alnum:][:space:]]+$/",
-                    "",
-                    field[9]
-                );
+            if isGenerated {
+                if isset field[12] && field[12] !== null {
+                    let generationExpression = field[12];
+                } else {
+                    let generationExpression = "";
+                }
 
-                if strcasecmp(definition["default"], "null") == 0 {
-                    let definition["default"] = null;
+                let definition["generated"] = generationExpression;
+                let definition["generationStored"] = true;
+            } else {
+                /**
+                 * Check if the column is auto increment
+                 */
+                if field[7] == "auto_increment" {
+                    let definition["autoIncrement"] = true;
+                }
+
+                /**
+                 * Check if the column has default values
+                 */
+                if field[9] !== null {
+                    let definition["default"] = preg_replace(
+                        "/(?:^')|(?:'?::[[:alnum:][:space:]]+$)/",
+                        "",
+                        field[9]
+                    );
+
+                    if strcasecmp(definition["default"], "null") == 0 {
+                        let definition["default"] = null;
+                    }
                 }
             }
 
@@ -534,11 +638,11 @@ class Postgresql extends PdoAdapter
      *
      *```php
      * print_r(
-     *     $connection->describeReferences("robots_parts")
+     *     $connection->describeReferences("co_orders_x_products")
      * );
      *```
      */
-    public function describeReferences(string! table, string! schema = null) -> <ReferenceInterface[]>
+    public function describeReferences(string table,  string schema = null) -> <ReferenceInterface[]>
     {
         var references, reference, arrayReference, constraintName,
             referenceObjects, name, referencedSchema, referencedTable, columns,
@@ -601,18 +705,18 @@ class Postgresql extends PdoAdapter
      * Returns the default identity value to be inserted in an identity column
      *
      *```php
-     * // Inserting a new robot with a valid default value for the column 'id'
+     * // Inserting a new invoice with a valid default value for the column 'inv_id'
      * $success = $connection->insert(
-     *     "robots",
+     *     "co_invoices",
      *     [
      *         $connection->getDefaultIdValue(),
-     *         "Astro Boy",
-     *         1952,
+     *         "Test Invoice",
+     *         100,
      *     ],
      *     [
-     *         "id",
-     *         "name",
-     *         "year",
+     *         "inv_id",
+     *         "inv_title",
+     *         "inv_total",
      *     ]
      * );
      *```
@@ -625,7 +729,7 @@ class Postgresql extends PdoAdapter
     /**
      * Modifies a table column based on a definition
      */
-    public function modifyColumn(string! tableName, string! schemaName, <ColumnInterface> column, <ColumnInterface> currentColumn = null) -> bool
+    public function modifyColumn(string tableName,  string schemaName, <ColumnInterface> column, <ColumnInterface> currentColumn = null) -> bool
     {
         var sql, queries, query, exception;
 
@@ -683,9 +787,33 @@ class Postgresql extends PdoAdapter
 
     /**
      * Returns PDO adapter DSN defaults as a key-value map.
+     *
+     * @phpstan-return db_dsn_defaults
      */
     protected function getDsnDefaults() -> array
     {
         return [];
+    }
+
+    /**
+     * Recognizes a PostgreSQL connection-loss failure by SQLSTATE
+     * (connection exception class 08, or admin/crash shutdown 57P0x) with a
+     * message fallback.
+     */
+    protected function isConnectionError(<\Throwable> exception) -> bool
+    {
+        var sqlState, message;
+
+        let sqlState = (string) exception->getCode();
+
+        if sqlState === "08003" || sqlState === "08006" ||
+            sqlState === "57P01" || sqlState === "57P02" || sqlState === "57P03" {
+            return true;
+        }
+
+        let message = exception->getMessage();
+
+        return memstr(message, "server closed the connection unexpectedly") ||
+            memstr(message, "no connection to the server");
     }
 }

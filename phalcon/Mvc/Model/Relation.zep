@@ -10,20 +10,48 @@
 
 namespace Phalcon\Mvc\Model;
 
+use Phalcon\Contracts\Mvc\MvcTypes;
+
 /**
- * Phalcon\Mvc\Model\Relation
- *
  * This class represents a relationship between two models
+ *
+ * @phpstan-import-type mvc_model_parameters from MvcTypes
+ * @phpstan-import-type mvc_relation_fields from MvcTypes
+ * @phpstan-import-type mvc_relation_options from MvcTypes
  */
 class Relation implements RelationInterface
 {
+    /**
+     * @var int
+     */
     const ACTION_CASCADE   = 2;
+    /**
+     * @var int
+     */
     const ACTION_RESTRICT  = 1;
+    /**
+     * @var int
+     */
     const BELONGS_TO       = 0;
+    /**
+     * @var int
+     */
     const HAS_MANY         = 2;
+    /**
+     * @var int
+     */
     const HAS_MANY_THROUGH = 4;
+    /**
+     * @var int
+     */
     const HAS_ONE          = 1;
+    /**
+     * @var int
+     */
     const HAS_ONE_THROUGH  = 3;
+    /**
+     * @var int
+     */
     const NO_ACTION        = 0;
 
     /**
@@ -33,6 +61,8 @@ class Relation implements RelationInterface
 
     /**
      * @var array|string
+     *
+     * @phpstan-var mvc_relation_fields
      */
     protected intermediateFields;
 
@@ -43,28 +73,21 @@ class Relation implements RelationInterface
 
     /**
      * @var array|string
+     *
+     * @phpstan-var mvc_relation_fields
      */
     protected intermediateReferencedFields;
 
-    /**
-     * @var array
-     */
-    protected options = [];
+    protected array options = [];
 
     /**
      * @var array|string
      */
     protected referencedFields;
 
-    /**
-     * @var string
-     */
-    protected referencedModel;
+    protected string referencedModel;
 
-    /**
-     * @var int
-     */
-    protected type;
+    protected int type;
 
     /**
      * Phalcon\Mvc\Model\Relation constructor
@@ -74,8 +97,10 @@ class Relation implements RelationInterface
      * @param array|string fields
      * @param array|string referencedFields
      * @param array options
+     *
+     * @phpstan-param mvc_relation_options $options
      */
-    public function __construct(int type, string! referencedModel, var fields, var referencedFields, array options = [])
+    public function __construct(int type,  string referencedModel, var fields, var referencedFields, array options = [])
     {
         let this->type = type,
             this->referencedModel = referencedModel,
@@ -88,6 +113,8 @@ class Relation implements RelationInterface
      * Returns the fields
      *
      * @return array|string
+     *
+     * @phpstan-return mvc_relation_fields
      */
     public function getFields()
     {
@@ -98,6 +125,8 @@ class Relation implements RelationInterface
      * Returns the foreign key configuration
      *
      * @return array|string
+     *
+     * @phpstan-return array<string, mixed>|string|bool
      */
     public function getForeignKey()
     {
@@ -118,6 +147,8 @@ class Relation implements RelationInterface
      * Gets the intermediate fields for has-*-through relations
      *
      * @return array|string
+     *
+     * @phpstan-return mvc_relation_fields
      */
     public function getIntermediateFields()
     {
@@ -136,6 +167,8 @@ class Relation implements RelationInterface
      * Gets the intermediate referenced fields for has-*-through relations
      *
      * @return array|string
+     *
+     * @phpstan-return mvc_relation_fields
      */
     public function getIntermediateReferencedFields()
     {
@@ -144,9 +177,9 @@ class Relation implements RelationInterface
 
     /**
      * Returns an option by the specified name
-     * If the option doesn't exist null is returned
+     * If the option does not exist null is returned
      */
-    public function getOption(string! name)
+    public function getOption(string name)
     {
         var option;
 
@@ -159,6 +192,8 @@ class Relation implements RelationInterface
 
     /**
      * Returns the options
+     *
+     * @phpstan-return mvc_relation_options
      */
     public function getOptions() -> array
     {
@@ -169,6 +204,8 @@ class Relation implements RelationInterface
      * Returns parameters that must be always used when the related records are obtained
      *
      * @return array
+     *
+     * @phpstan-return mvc_model_parameters|false
      */
     public function getParams()
     {
@@ -190,17 +227,11 @@ class Relation implements RelationInterface
     }
 
     /**
-     * Returns the relation type
-     */
-    public function getType() -> int
-    {
-        return this->type;
-    }
-
-    /**
      * Returns the referenced fields
      *
      * @return array|string
+     *
+     * @phpstan-return mvc_relation_fields
      */
     public function getReferencedFields()
     {
@@ -216,6 +247,14 @@ class Relation implements RelationInterface
     }
 
     /**
+     * Returns the relation type
+     */
+    public function getType() -> int
+    {
+        return this->type;
+    }
+
+    /**
      * Check whether the relation act as a foreign key
      */
     public function isForeignKey() -> bool
@@ -227,18 +266,6 @@ class Relation implements RelationInterface
         }
 
         return (bool) foreignKey;
-    }
-
-    /**
-     * Check whether the relation is a 'many-to-many' relation or not
-     */
-    public function isThrough() -> bool
-    {
-        var type;
-
-        let type = this->type;
-
-        return type == self::HAS_ONE_THROUGH || type == self::HAS_MANY_THROUGH;
     }
 
     /**
@@ -258,13 +285,25 @@ class Relation implements RelationInterface
     }
 
     /**
+     * Check whether the relation is a 'many-to-many' relation or not
+     */
+    public function isThrough() -> bool
+    {
+        var type;
+
+        let type = this->type;
+
+        return type == self::HAS_ONE_THROUGH || type == self::HAS_MANY_THROUGH;
+    }
+
+    /**
      * Sets the intermediate model data for has-*-through relations
      *
      * @param array|string intermediateFields
      * @param string       intermediateModel
      * @param array|string intermediateReferencedFields
      */
-    public function setIntermediateRelation(var intermediateFields, string! intermediateModel, var intermediateReferencedFields)
+    public function setIntermediateRelation(var intermediateFields,  string intermediateModel, var intermediateReferencedFields)
     {
         let this->intermediateFields = intermediateFields,
             this->intermediateModel = intermediateModel,

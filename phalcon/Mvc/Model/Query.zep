@@ -10,12 +10,65 @@
 
 namespace Phalcon\Mvc\Model;
 
+use Phalcon\Cache\CacheInterface;
+use Phalcon\Contracts\Mvc\MvcTypes;
 use Phalcon\Db\Column;
 use Phalcon\Db\RawValue;
 use Phalcon\Db\ResultInterface;
 use Phalcon\Db\Adapter\AdapterInterface;
 use Phalcon\Di\DiInterface;
 use Phalcon\Mvc\ModelInterface;
+use Phalcon\Mvc\Model\Query\Exceptions\AmbiguousColumn;
+use Phalcon\Mvc\Model\Query\Exceptions\AmbiguousJoinRelation;
+use Phalcon\Mvc\Model\Query\Exceptions\BindParameterNotInPlaceholders;
+use Phalcon\Mvc\Model\Query\Exceptions\BindTypeRequiresArray;
+use Phalcon\Mvc\Model\Query\Exceptions\BindValueRequired;
+use Phalcon\Mvc\Model\Query\Exceptions\ColumnNotInDomain;
+use Phalcon\Mvc\Model\Query\Exceptions\ColumnNotInSelectedModels;
+use Phalcon\Mvc\Model\Query\Exceptions\CorruptedAst;
+use Phalcon\Mvc\Model\Query\Exceptions\CorruptedDeleteAst;
+use Phalcon\Mvc\Model\Query\Exceptions\CorruptedInsertAst;
+use Phalcon\Mvc\Model\Query\Exceptions\CorruptedSelectAst;
+use Phalcon\Mvc\Model\Query\Exceptions\CorruptedUpdateAst;
+use Phalcon\Mvc\Model\Query\Exceptions\DeleteMultipleNotSupported;
+use Phalcon\Mvc\Model\Query\Exceptions\DuplicateAlias;
+use Phalcon\Mvc\Model\Query\Exceptions\EmptyArrayPlaceholderValue;
+use Phalcon\Mvc\Model\Query\Exceptions\InsertColumnCountMismatch;
+use Phalcon\Mvc\Model\Query\Exceptions\InvalidCachedResultset;
+use Phalcon\Mvc\Model\Query\Exceptions\InvalidCachingOptions;
+use Phalcon\Mvc\Model\Query\Exceptions\InvalidColumnDefinition;
+use Phalcon\Mvc\Model\Query\Exceptions\InvalidInjectedManager;
+use Phalcon\Mvc\Model\Query\Exceptions\InvalidInjectedMetadata;
+use Phalcon\Mvc\Model\Query\Exceptions\InvalidQueryCacheService;
+use Phalcon\Mvc\Model\Query\Exceptions\InvalidResultsetClass;
+use Phalcon\Mvc\Model\Query\Exceptions\InvalidResultsetRowClass;
+use Phalcon\Mvc\Model\Query\Exceptions\JoinAliasAlreadyUsed;
+use Phalcon\Mvc\Model\Query\Exceptions\JoinFieldCountMismatch;
+use Phalcon\Mvc\Model\Query\Exceptions\MissingCacheKey;
+use Phalcon\Mvc\Model\Query\Exceptions\MissingMetaData;
+use Phalcon\Mvc\Model\Query\Exceptions\MissingModelAttribute;
+use Phalcon\Mvc\Model\Query\Exceptions\MissingModelsManager;
+use Phalcon\Mvc\Model\Query\Exceptions\MixedDatabaseSystems;
+use Phalcon\Mvc\Model\Query\Exceptions\ModelsListNotLoaded;
+use Phalcon\Mvc\Model\Query\Exceptions\ModelSourceNotFound;
+use Phalcon\Mvc\Model\Query\Exceptions\MultipleSqlStatementsNotSupported;
+use Phalcon\Mvc\Model\Query\Exceptions\NoModelForAlias;
+use Phalcon\Mvc\Model\Query\Exceptions\PhqlColumnNotInMap;
+use Phalcon\Mvc\Model\Query\Exceptions\ReadConnectionMissing;
+use Phalcon\Mvc\Model\Query\Exceptions\RelationshipNotFound;
+use Phalcon\Mvc\Model\Query\Exceptions\ResultsetClassNotFound;
+use Phalcon\Mvc\Model\Query\Exceptions\ResultsetNonCacheable;
+use Phalcon\Mvc\Model\Query\Exceptions\ResultsetRowClassNotFound;
+use Phalcon\Mvc\Model\Query\Exceptions\UnknownBindType;
+use Phalcon\Mvc\Model\Query\Exceptions\UnknownColumnType;
+use Phalcon\Mvc\Model\Query\Exceptions\UnknownJoinType;
+use Phalcon\Mvc\Model\Query\Exceptions\UnknownModelOrAlias;
+use Phalcon\Mvc\Model\Query\Exceptions\UnknownPhqlExpression;
+use Phalcon\Mvc\Model\Query\Exceptions\UnknownPhqlExpressionType;
+use Phalcon\Mvc\Model\Query\Exceptions\UnknownPhqlStatement;
+use Phalcon\Mvc\Model\Query\Exceptions\UnsafeIdentifier;
+use Phalcon\Mvc\Model\Query\Exceptions\UpdateMultipleNotSupported;
+use Phalcon\Mvc\Model\Query\Exceptions\WriteConnectionMissing;
 use Phalcon\Mvc\Model\Query\Status;
 use Phalcon\Mvc\Model\Resultset\Complex;
 use Phalcon\Mvc\Model\Query\StatusInterface;
@@ -24,11 +77,9 @@ use Phalcon\Mvc\Model\Resultset\Simple;
 use Phalcon\Di\InjectionAwareInterface;
 use Phalcon\Db\DialectInterface;
 use Phalcon\Mvc\Model\Query\Lang;
-use Psr\SimpleCache\CacheInterface;
+use Phalcon\Support\Settings;
 
 /**
- * Phalcon\Mvc\Model\Query
- *
  * This class takes a PHQL intermediate representation and executes it.
  *
  *```php
@@ -55,17 +106,17 @@ use Psr\SimpleCache\CacheInterface;
  * // $di needs to have the service "db" registered for this to work
  * $di = Phalcon\Di\FactoryDefault::getDefault();
  *
- * $phql = 'SELECT * FROM robot';
+ * $phql = 'SELECT * FROM Invoices';
  *
  * $myTransaction = new Transaction($di);
  * $myTransaction->begin();
  *
- * $newRobot = new Robot();
- * $newRobot->setTransaction($myTransaction);
- * $newRobot->type = "mechanical";
- * $newRobot->name = "Astro Boy";
- * $newRobot->year = 1952;
- * $newRobot->save();
+ * $newInvoice = new Invoices();
+ * $newInvoice->setTransaction($myTransaction);
+ * $newInvoice->inv_status_flag = 1;
+ * $newInvoice->inv_title = "Test Invoice";
+ * $newInvoice->inv_total = 100;
+ * $newInvoice->save();
  *
  * $queryWithTransaction = new Query($phql, $di);
  * $queryWithTransaction->setTransaction($myTransaction);
@@ -75,54 +126,83 @@ use Psr\SimpleCache\CacheInterface;
  * $queryWithOutTransaction = new Query($phql, $di);
  * $resultWithOutEntries = $queryWithTransaction->execute();
  *```
+ *
+ * @phpstan-import-type mvc_model_bind_params from MvcTypes
+ * @phpstan-import-type mvc_model_bind_types from MvcTypes
+ * @phpstan-import-type mvc_model_cache_options from MvcTypes
+ * @phpstan-import-type mvc_query_ir from MvcTypes
+ * @phpstan-import-type mvc_query_ast from MvcTypes
  */
 class Query implements QueryInterface, InjectionAwareInterface
 {
+    /**
+     * @var int
+     */
     const TYPE_DELETE = 303;
+    /**
+     * @var int
+     */
     const TYPE_INSERT = 306;
+    /**
+     * @var int
+     */
     const TYPE_SELECT = 309;
+    /**
+     * @var int
+     */
     const TYPE_UPDATE = 300;
 
     /**
      * @var array
      * TODO: Add default value, instead of null, also remove type check
+     *
+     * @phpstan-var mvc_query_ast
      */
     protected ast;
 
     /**
      * @var array
+     *
+     * @phpstan-var mvc_model_bind_params
      */
     protected bindParams = [];
 
     /**
      * @var array
+     *
+     * @phpstan-var mvc_model_bind_types
      */
     protected bindTypes = [];
 
     /**
-     * @var \Psr\SimpleCache\CacheInterface|null
+     * @var mixed|null
      */
     protected cache = null;
 
     /**
      * @var array|null
+     *
+     * @phpstan-var mvc_model_cache_options|null
      */
     protected cacheOptions;
 
-    /**
-     * @var DiInterface|null
-     */
-    protected container = null;
+    protected ?<DiInterface> container = null;
 
-    /**
-     * @var bool
-     */
-    protected enableImplicitJoins;
+    protected bool enableImplicitJoins;
 
     /**
      * @var array
+     *
+     * @phpstan-var mvc_query_ir|null
      */
     protected intermediate;
+
+    /**
+     * @var array|null
+     *
+     * @phpstan-var array<array-key, mvc_query_ir>|null
+     */
+    protected static internalPhqlCache;
 
     /**
      * @var \Phalcon\Mvc\Model\ManagerInterface|null
@@ -135,79 +215,65 @@ class Query implements QueryInterface, InjectionAwareInterface
     protected metaData = null;
 
     /**
-     * @var array
+     * @phpstan-var array<string, string>
      */
-    protected models = [];
+    protected array models = [];
 
     /**
-     * @var array
+     * @phpstan-var array<string, ModelInterface>
      */
-    protected modelsInstances = [];
+    protected array modelsInstances = [];
 
-    /**
-     * @var int
-     */
-    protected nestingLevel = -1;
+    protected int nestingLevel = -1;
 
     /**
      * @var string|null
      */
     protected phql = null;
 
-    /**
-     * @var bool
-     */
-    protected sharedLock = false;
+    protected string resultsetRowClass = "";
+
+    protected bool sharedLock = false;
 
     /**
-     * @var array
+     * @phpstan-var array<string, string>
      */
-    protected sqlAliases = [];
+    protected array sqlAliases = [];
 
     /**
-     * @var array
+     * @phpstan-var array<string, string>
      */
-    protected sqlAliasesModels = [];
+    protected array sqlAliasesModels = [];
 
     /**
-     * @var array
+     * @phpstan-var array<string, ModelInterface>
      */
-    protected sqlAliasesModelsInstances = [];
+    protected array sqlAliasesModelsInstances = [];
 
     /**
-     * @var array
+     * @phpstan-var array<int, array<string, bool>>
      */
-    protected sqlColumnAliases = [];
+    protected array sqlColumnAliases = [];
 
     /**
-     * @var array
+     * @phpstan-var array<string, string>
      */
-    protected sqlModelsAliases = [];
-
-    /**
-     * @var int|null
-     */
-    protected type;
-
-    /**
-     * @var bool
-     */
-    protected uniqueRow = false;
+    protected array sqlModelsAliases = [];
 
     /**
      * TransactionInterface so that the query can wrap a transaction
      * around batch updates and intermediate selects within the transaction.
      * however if a model got a transaction set inside it will use the local
      * transaction instead of this one
-     *
-     * @var TransactionInterface|null
      */
-    protected transaction { get };
+    protected ?<TransactionInterface> transaction = null;
 
     /**
-     * @var array|null
+     * @var int|null
      */
-    protected static internalPhqlCache;
+    protected type;
+
+    protected bool uniqueRow = false;
 
     /**
      * Phalcon\Mvc\Model\Query constructor
@@ -215,6 +281,8 @@ class Query implements QueryInterface, InjectionAwareInterface
      * @param string|null phql
      * @param DiInterface|null container
      * @param array options
+     *
+     * @phpstan-param array<string, mixed> $options
      */
     public function __construct(string phql = null, <DiInterface> container = null, array options = [])
     {
@@ -229,23 +297,13 @@ class Query implements QueryInterface, InjectionAwareInterface
         if fetch enableImplicitJoins, options["enable_implicit_joins"] {
             let this->enableImplicitJoins = (enableImplicitJoins == true);
         } else {
-            let this->enableImplicitJoins = globals_get(
+            let this->enableImplicitJoins = Settings::get(
                 "orm.enable_implicit_joins"
             );
         }
 
         let this->bindParams = [];
         let this->bindTypes = [];
-    }
-
-    /**
-     * Sets the cache parameters of the query
-     */
-    public function cache(array cacheOptions) -> <QueryInterface>
-    {
-        let this->cacheOptions = cacheOptions;
-
-        return this;
     }
 
     /**
@@ -257,38 +315,48 @@ class Query implements QueryInterface, InjectionAwareInterface
     }
 
     /**
+     * Sets the cache parameters of the query
+     *
+     * @phpstan-param mvc_model_cache_options $cacheOptions
+     */
+    public function cache(array cacheOptions) -> <QueryInterface>
+    {
+        let this->cacheOptions = cacheOptions;
+
+        return this;
+    }
+
+    /**
      * Executes a parsed PHQL statement
      *
      * @return mixed
+     *
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
     public function execute(array bindParams = [], array bindTypes = [])
     {
-        var uniqueRow, cacheOptions, key, cacheService, cache, result,
-            preparedResult, defaultBindParams, mergedParams, defaultBindTypes,
-            mergedTypes, type, lifetime, intermediate;
+        var adapter, cacheLifetime, cacheOptions, cacheService, defaultBindParams,
+            defaultBindTypes, intermediate, mergedParams, mergedTypes,
+            preparedResult, type, uniqueRow,
+            cache    = null,
+            key      = "",
+            lifetime = null,
+            result   = false;
 
         let uniqueRow    = this->uniqueRow,
             cacheOptions = this->cacheOptions;
 
         if cacheOptions !== null {
             if unlikely typeof cacheOptions != "array" {
-                throw new Exception("Invalid caching options");
+                throw new InvalidCachingOptions();
             }
 
             /**
              * The user must set a cache key
              */
             if unlikely !fetch key, cacheOptions["key"] {
-                throw new Exception(
-                    "A cache key must be provided to identify the cached resultset in the cache backend"
-                );
-            }
-
-            /**
-             * By default use use 3600 seconds (1 hour) as cache lifetime
-             */
-            if !fetch lifetime, cacheOptions["lifetime"] {
-                let lifetime = 3600;
+                throw new MissingCacheKey();
             }
 
             if !fetch cacheService, cacheOptions["service"] {
@@ -297,17 +365,29 @@ class Query implements QueryInterface, InjectionAwareInterface
 
             let cache = this->container->getShared(cacheService);
 
-            if unlikely !(cache instanceof CacheInterface) {
-                throw new Exception("Cache service must be an object implementing Psr\SimpleCache\CacheInterface");
+            if unlikely (true !== is_a(cache,  CacheInterface::class)) {
+                throw new InvalidQueryCacheService();
             }
 
-            let result = cache->get(key);
+            /**
+             * If the lifetime is different than the cache lifetime, assign
+             * the cache lifetime to the current cache setting
+             */
+            let adapter       = cache->getAdapter();
+            let cacheLifetime = adapter->getLifetime();
+
+            if !fetch lifetime, cacheOptions["lifetime"] {
+                let lifetime = cacheLifetime;
+            }
+
+            let result = false;
+            if (cache->has(key)) {
+                let result = cache->get(key);
+            }
 
             if !empty result {
                 if unlikely typeof result != "object" {
-                    throw new Exception(
-                        "Cache didn't return a valid resultset"
-                    );
+                    throw new InvalidCachedResultset();
                 }
 
                 result->setIsFresh(false);
@@ -390,7 +470,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                 break;
 
             default:
-                throw new Exception("Unknown statement " . type);
+                throw new UnknownPhqlStatement(type);
         }
 
         /**
@@ -401,9 +481,7 @@ class Query implements QueryInterface, InjectionAwareInterface
              * Only PHQL SELECTs can be cached
              */
             if type != PHQL_T_SELECT {
-                throw new Exception(
-                    "Only PHQL statements that return resultsets can be cached"
-                );
+                throw new ResultsetNonCacheable();
             }
 
             cache->set(key, result, lifetime);
@@ -422,6 +500,26 @@ class Query implements QueryInterface, InjectionAwareInterface
     }
 
     /**
+     * Returns default bind params
+     *
+     * @phpstan-return mvc_model_bind_params
+     */
+    public function getBindParams() -> array
+    {
+        return this->bindParams;
+    }
+
+    /**
+     * Returns default bind types
+     *
+     * @phpstan-return mvc_model_bind_types
+     */
+    public function getBindTypes() -> array
+    {
+        return this->bindTypes;
+    }
+
+    /**
      * Returns the current cache backend instance
      */
     public function getCache() -> <AdapterInterface>
@@ -431,26 +529,12 @@ class Query implements QueryInterface, InjectionAwareInterface
 
     /**
      * Returns the current cache options
+     *
+     * @phpstan-return mvc_model_cache_options
      */
     public function getCacheOptions() -> array
     {
         return this->cacheOptions;
-    }
-
-    /**
-     * Returns default bind params
-     */
-    public function getBindParams() -> array
-    {
-        return this->bindParams;
-    }
-
-    /**
-     * Returns default bind types
-     */
-    public function getBindTypes() -> array
-    {
-        return this->bindTypes;
     }
 
     /**
@@ -463,6 +547,8 @@ class Query implements QueryInterface, InjectionAwareInterface
 
     /**
      * Returns the intermediate representation of the PHQL statement
+     *
+     * @phpstan-return mvc_query_ir
      */
     public function getIntermediate() -> array
     {
@@ -471,6 +557,9 @@ class Query implements QueryInterface, InjectionAwareInterface
 
     /**
      * Executes the query returning the first result
+     *
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
     public function getSingleResult(array bindParams = [], array bindTypes = []) -> <ModelInterface>
     {
@@ -485,8 +574,18 @@ class Query implements QueryInterface, InjectionAwareInterface
     }
 
     /**
-     * Returns the SQL to be generated by the internal PHQL (only works in
-     * SELECT statements)
+     * Returns an associative array with the SQL to be generated by the internal PHQL,
+     * and arrays with bound parameters and their types (only works in SELECT statements).
+     *
+     *```php
+     * [
+     *     'sql' => 'SELECT * FROM co_invoices WHERE inv_cst_id = :cst_id',
+     *     'bind' => ['cst_id' => 123],
+     *     'bindTypes => ['cst_id' => 1] // 1 corresponds to int
+     * ]
+     *```
+     *
+     * @phpstan-return array<string, mixed>
      */
     public function getSql() -> array
     {
@@ -507,9 +606,15 @@ class Query implements QueryInterface, InjectionAwareInterface
             );
         }
 
-        throw new Exception(
-            "This type of statement generates multiple SQL statements"
-        );
+        throw new MultipleSqlStatementsNotSupported();
+    }
+
+    /**
+     * @return TransactionInterface|null
+     */
+    public function getTransaction() -> <TransactionInterface> | null
+    {
+        return this->transaction;
     }
 
     /**
@@ -521,8 +626,20 @@ class Query implements QueryInterface, InjectionAwareInterface
     }
 
     /**
+     * Returns the class that will be used to hydrate rows that are not mapped
+     * to a model (custom columns/joins). An empty string means the default
+     * Phalcon\Mvc\Model\Row is used.
+     */
+    public function getResultsetRowClass() -> string
+    {
+        return this->resultsetRowClass;
+    }
+
+    /**
      * Check if the query is programmed to get only the first row in the
      * resultset
+     *
+     * @return bool
      */
     public function getUniqueRow() -> bool
     {
@@ -533,6 +650,8 @@ class Query implements QueryInterface, InjectionAwareInterface
      * Parses the intermediate code produced by Phalcon\Mvc\Model\Query\Lang
      * generating another intermediate representation that could be executed by
      * Phalcon\Mvc\Model\Query
+     *
+     * @phpstan-return mvc_query_ir
      */
     public function parse() -> array
     {
@@ -564,7 +683,15 @@ class Query implements QueryInterface, InjectionAwareInterface
                         // Assign the type to the query
                         let this->type = ast["type"];
 
-                        return irPhql;
+                        /**
+                         * Refresh schema/source for every model referenced
+                         * in the cached intermediate representation. The
+                         * cache is keyed by the PHQL string only, so models
+                         * that change their schema/source at runtime would
+                         * otherwise keep producing SQL with the stale value
+                         * baked in at first parse. See issue #17020.
+                         */
+                        return this->refreshSchemasInIntermediate(irPhql);
                     }
                 }
             }
@@ -578,31 +705,29 @@ class Query implements QueryInterface, InjectionAwareInterface
 
                 switch type {
                     case PHQL_T_SELECT:
-                        let irPhql = this->_prepareSelect();
+                        let irPhql = this->prepareSelect();
                         break;
 
                     case PHQL_T_INSERT:
-                        let irPhql = this->_prepareInsert();
+                        let irPhql = this->prepareInsert();
                         break;
 
                     case PHQL_T_UPDATE:
-                        let irPhql = this->_prepareUpdate();
+                        let irPhql = this->prepareUpdate();
                         break;
 
                     case PHQL_T_DELETE:
-                        let irPhql = this->_prepareDelete();
+                        let irPhql = this->prepareDelete();
                         break;
 
                     default:
-                        throw new Exception(
-                            "Unknown statement " . type . ", when preparing: " . phql
-                        );
+                        throw new UnknownPhqlStatement(type, phql);
                 }
             }
         }
 
         if unlikely typeof irPhql != "array" {
-            throw new Exception("Corrupted AST");
+            throw new CorruptedAst();
         }
 
         /**
@@ -619,8 +744,10 @@ class Query implements QueryInterface, InjectionAwareInterface
 
     /**
      * Set default bind parameters
+     *
+     * @phpstan-param mvc_model_bind_params $bindParams
      */
-    public function setBindParams(array! bindParams, bool merge = false) -> <QueryInterface>
+    public function setBindParams(array bindParams, bool merge = false) -> <QueryInterface>
     {
         var currentBindParams;
 
@@ -636,8 +763,10 @@ class Query implements QueryInterface, InjectionAwareInterface
 
     /**
      * Set default bind parameters
+     *
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
-    public function setBindTypes(array! bindTypes, bool merge = false) -> <QueryInterface>
+    public function setBindTypes(array bindTypes, bool merge = false) -> <QueryInterface>
     {
         var currentBindTypes;
 
@@ -666,13 +795,13 @@ class Query implements QueryInterface, InjectionAwareInterface
         let manager = container->getShared("modelsManager");
 
         if unlikely typeof manager != "object" {
-            throw new Exception("Injected service 'modelsManager' is invalid");
+            throw new InvalidInjectedManager();
         }
 
         let metaData = container->getShared("modelsMetadata");
 
         if unlikely typeof metaData != "object" {
-            throw new Exception("Injected service 'modelsMetaData' is invalid");
+            throw new InvalidInjectedMetadata();
         }
 
         let this->manager = manager,
@@ -683,10 +812,32 @@ class Query implements QueryInterface, InjectionAwareInterface
 
     /**
      * Allows to set the IR to be executed
+     *
+     * @phpstan-param mvc_query_ir $intermediate
      */
-    public function setIntermediate(array! intermediate) -> <QueryInterface>
+    public function setIntermediate(array intermediate) -> <QueryInterface>
     {
         let this->intermediate = intermediate;
+
+        return this;
+    }
+
+    /**
+     * Sets the class used to hydrate rows that are not mapped to a model
+     * (custom columns/joins). The class must be a subclass of
+     * Phalcon\Mvc\Model\Row.
+     */
+    public function setResultsetRowClass(string resultsetRowClass) -> <QueryInterface>
+    {
+        if unlikely !class_exists(resultsetRowClass) {
+            throw new ResultsetRowClassNotFound(resultsetRowClass);
+        }
+
+        if unlikely !is_subclass_of(resultsetRowClass, Row::class) {
+            throw new InvalidResultsetRowClass(resultsetRowClass);
+        }
+
+        let this->resultsetRowClass = resultsetRowClass;
 
         return this;
     }
@@ -735,17 +886,19 @@ class Query implements QueryInterface, InjectionAwareInterface
     /**
      * Executes the DELETE intermediate representation producing a
      * Phalcon\Mvc\Model\Query\Status
+     *
+     * @phpstan-param mvc_query_ir $intermediate
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
     final protected function executeDelete(array intermediate, array bindParams, array bindTypes) -> <StatusInterface>
     {
-        var models, modelName, model, records, connection, record;
+        var models, modelName, model, records, connection, record, exception;
 
         let models = intermediate["models"];
 
         if unlikely isset models[1] {
-            throw new Exception(
-                "Delete from several models at the same time is still not supported"
-            );
+            throw new DeleteMultipleNotSupported();
         }
 
         let modelName = models[0];
@@ -788,21 +941,27 @@ class Query implements QueryInterface, InjectionAwareInterface
         records->rewind();
 
         while records->valid() {
-            let record = records->current();
+            try {
+                let record = records->current();
 
-            /**
-             * We delete every record found
-             */
-            if !record->delete() {
                 /**
-                 * Rollback the transaction
+                 * We delete every record found
                  */
+                if !record->delete() {
+                    /**
+                     * Rollback the transaction
+                     */
+                    connection->rollback();
+
+                    return new Status(false, record);
+                }
+
+                records->next();
+            } catch \PDOException, exception {
                 connection->rollback();
 
-                return new Status(false, record);
+                throw exception;
             }
-
-            records->next();
         }
 
         /**
@@ -816,17 +975,20 @@ class Query implements QueryInterface, InjectionAwareInterface
         return new Status(true);
     }
 
-
     /**
      * Executes the INSERT intermediate representation producing a
      * Phalcon\Mvc\Model\Query\Status
+     *
+     * @phpstan-param mvc_query_ir $intermediate
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
     final protected function executeInsert(array intermediate, array bindParams, array bindTypes) -> <StatusInterface>
     {
-        var modelName, manager, connection, metaData, attributes, fields,
-            columnMap, dialect, insertValues, number, value, model, values,
-            exprValue, insertValue, wildcard, fieldName, attributeName,
-            insertModel;
+        var attributeName, attributes, connection, dialect, exprValue, fieldName,
+            fields, insertModel, insertValue, insertValues, manager, metaData,
+            model, modelName, number, value, values, wildcard,
+            columnMap = null;
         bool automaticFields;
 
         let modelName = intermediate["model"];
@@ -857,7 +1019,7 @@ class Query implements QueryInterface, InjectionAwareInterface
             let automaticFields = true,
                 fields = attributes;
 
-            if globals_get("orm.column_renaming") {
+            if Settings::get("orm.column_renaming") {
                 let columnMap = metaData->getColumnMap(model);
             } else {
                 let columnMap = null;
@@ -871,9 +1033,7 @@ class Query implements QueryInterface, InjectionAwareInterface
          * in the model
          */
         if unlikely count(fields) != count(values) {
-            throw new Exception(
-                "The column count does not match the values count"
-            );
+            throw new InsertColumnCountMismatch();
         }
 
         /**
@@ -907,9 +1067,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                     );
 
                     if unlikely !fetch insertValue, bindParams[wildcard] {
-                        throw new Exception(
-                            "Bound parameter '" . wildcard . "' cannot be replaced because it isn't in the placeholders list"
-                        );
+                        throw new BindParameterNotInPlaceholders(wildcard);
                     }
 
                     break;
@@ -930,9 +1088,7 @@ class Query implements QueryInterface, InjectionAwareInterface
              */
             if automaticFields && typeof columnMap == "array" {
                 if unlikely !fetch attributeName, columnMap[fieldName] {
-                    throw new Exception(
-                        "Column '" . fieldName . "' isn't part of the column map"
-                    );
+                    throw new PhqlColumnNotInMap(fieldName);
                 }
             } else {
                 let attributeName = fieldName;
@@ -961,18 +1117,24 @@ class Query implements QueryInterface, InjectionAwareInterface
     /**
      * Executes the SELECT intermediate representation producing a
      * Phalcon\Mvc\Model\Resultset
+     *
+     * @phpstan-param mvc_query_ir $intermediate
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
+     * @phpstan-return array<array-key, mixed>|ResultsetInterface
      */
     final protected function executeSelect(array intermediate, array bindParams, array bindTypes, bool simulate = false) -> <ResultsetInterface> | array
     {
-        var manager, modelName, models, model, connection, connectionTypes,
-            columns, column, selectColumns, simpleColumnMap, metaData,
-            aliasCopy, sqlColumn, attributes, instance, columnMap, attribute,
-            columnAlias, sqlAlias, dialect, sqlSelect, bindCounts, processed,
-            wildcard, value, processedTypes, typeWildcard, result, resultData,
-            cache, resultObject, columns1, typesColumnMap, wildcardValue,
-            resultsetClassName;
-        bool haveObjects, haveScalars, isComplex, isSimpleStd,
-            isKeepingSnapshots;
+        var aliasCopy, attribute, attributes, bindCounts, cache, column,
+            columnAlias, columnMap, columns, columns1, connectionTypes, dialect,
+            instance, manager, metaData, modelName, models, processed,
+            processedTypes, result, resultData, resultObject, resultsetClassName,
+            selectColumns, simpleColumnMap, sqlAlias, sqlColumn, sqlSelect,
+            typeWildcard, typesColumnMap, value, wildcard, wildcardValue,
+            connection = null,
+            model      = null;
+        bool haveObjects, haveScalars, isComplex, isKeepingSnapshots,
+             isSimpleStd = true;
         int numberObjects;
 
         let manager = this->manager;
@@ -990,21 +1152,28 @@ class Query implements QueryInterface, InjectionAwareInterface
                     this->modelsInstances[modelName] = model;
             }
 
-            let connection = this->getReadConnection(
-                model,
-                intermediate,
-                bindParams,
-                bindTypes
-            );
+            if isset intermediate["forUpdate"] && intermediate["forUpdate"] {
+                let connection = this->getWriteConnection(
+                    model,
+                    intermediate,
+                    bindParams,
+                    bindTypes
+                );
+            } else {
+                let connection = this->getReadConnection(
+                    model,
+                    intermediate,
+                    bindParams,
+                    bindTypes
+                );
+            }
 
             if typeof connection == "object" {
                 // More than one type of connection is not allowed
                 let connectionTypes[connection->getType()] = true;
 
                 if unlikely count(connectionTypes) == 2 {
-                    throw new Exception(
-                        "Cannot use models of different database systems in the same query"
-                    );
+                    throw new MixedDatabaseSystems();
                 }
             }
         }
@@ -1021,7 +1190,7 @@ class Query implements QueryInterface, InjectionAwareInterface
 
         for column in columns {
             if unlikely typeof column != "array" {
-                throw new Exception("Invalid column definition");
+                throw new InvalidColumnDefinition();
             }
 
             if column["type"] == "scalar" {
@@ -1081,7 +1250,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                      * If the resultset is complex we open every model into
                      * their columns
                      */
-                    if globals_get("orm.column_renaming") {
+                    if Settings::get("orm.column_renaming") {
                         let columnMap = metaData->getColumnMap(instance);
                     } else {
                         let columnMap = null;
@@ -1120,7 +1289,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                 }
             } else {
                 /**
-                 * Create an alias if the column doesn't have one
+                 * Create an alias if the column does not have one
                  */
                 if typeof aliasCopy == "int" {
                     let columnAlias = [sqlColumn, null];
@@ -1177,7 +1346,7 @@ class Query implements QueryInterface, InjectionAwareInterface
             }
         }
 
-        if count(bindCounts) {
+        if !empty bindCounts {
             let intermediate["bindCounts"] = bindCounts;
         }
 
@@ -1190,6 +1359,54 @@ class Query implements QueryInterface, InjectionAwareInterface
 
         if this->sharedLock {
             let sqlSelect = dialect->sharedLock(sqlSelect);
+        }
+
+        /**
+         * Embed RawValue bind params directly in the SQL instead of passing
+         * them to PDO, which would quote them as strings. The value is emitted
+         * verbatim (unescaped), so a RawValue must never wrap untrusted data.
+         * See Phalcon\Db\RawValue.
+         */
+        var rawWildcards, rawValue, placeholder;
+
+        let rawWildcards = [];
+        for wildcard, value in processed {
+            if typeof value == "object" && value instanceof RawValue {
+                let rawWildcards[] = wildcard;
+            }
+        }
+
+        /**
+         * Replace the longest wildcard first and anchor the match with a word
+         * boundary, so a name that is a prefix of another (":APL0" vs
+         * ":APL01") cannot corrupt the longer one. A callback keeps the value
+         * literal, avoiding preg_replace back-reference expansion of a "$" or
+         * "\" inside the RawValue.
+         *
+         * With zero or one wildcard, the sort cannot change the order.
+         */
+        if count(rawWildcards) > 1 {
+            usort(
+                rawWildcards,
+                function (a, b) {
+                    return strlen(b) - strlen(a);
+                }
+            );
+        }
+
+        for wildcard in rawWildcards {
+            let rawValue    = (string) processed[wildcard],
+                placeholder = substr(wildcard, 0, 1) === ":" ? substr(wildcard, 1) : wildcard,
+                sqlSelect   = preg_replace_callback(
+                    "/:" . preg_quote(placeholder, "/") . "\\b/",
+                    function (matches) use (rawValue) {
+                        return rawValue;
+                    },
+                    sqlSelect
+                );
+
+            unset processed[wildcard];
+            unset processedTypes[wildcard];
         }
 
         /**
@@ -1232,9 +1449,13 @@ class Query implements QueryInterface, InjectionAwareInterface
             if isSimpleStd {
                 /**
                  * If the result is a simple standard object use an
-                 * Phalcon\Mvc\Model\Row as base
+                 * Phalcon\Mvc\Model\Row as base (or a custom subclass when set)
                  */
-                let resultObject = new Row();
+                if this->resultsetRowClass !== "" {
+                    let resultObject = create_instance(this->resultsetRowClass);
+                } else {
+                    let resultObject = new Row();
+                }
 
                 /**
                  * Standard objects can't keep snapshots
@@ -1250,7 +1471,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                 /**
                  * Get the column map
                  */
-                if !globals_get("orm.cast_on_hydrate") {
+                if !Settings::get("orm.cast_on_hydrate") {
                     let simpleColumnMap = metaData->getColumnMap(resultObject);
                 } else {
                     let columnMap      = metaData->getColumnMap(resultObject),
@@ -1288,15 +1509,11 @@ class Query implements QueryInterface, InjectionAwareInterface
 
                 if resultsetClassName {
                     if unlikely !class_exists(resultsetClassName) {
-                        throw new Exception(
-                            "Resultset class \"" . resultsetClassName . "\" not found"
-                        );
+                        throw new ResultsetClassNotFound(resultsetClassName);
                     }
 
-                    if unlikely !is_subclass_of(resultsetClassName, "Phalcon\\Mvc\\Model\\ResultsetInterface") {
-                        throw new Exception(
-                            "Resultset class \"" . resultsetClassName . "\" must be an implementation of Phalcon\\Mvc\\Model\\ResultsetInterface"
-                        );
+                    if unlikely !is_subclass_of(resultsetClassName, ResultsetInterface::class) {
+                        throw new InvalidResultsetClass(resultsetClassName);
                     }
 
                     return create_instance_params(
@@ -1330,26 +1547,30 @@ class Query implements QueryInterface, InjectionAwareInterface
         return new Complex(
             columns1,
             resultData,
-            cache
+            cache,
+            this->resultsetRowClass
         );
     }
 
     /**
      * Executes the UPDATE intermediate representation producing a
      * Phalcon\Mvc\Model\Query\Status
+     *
+     * @phpstan-param mvc_query_ir $intermediate
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
     final protected function executeUpdate(array intermediate, array bindParams, array bindTypes) -> <StatusInterface>
     {
         var models, modelName, model, connection, dialect, fields, values,
             updateValues, fieldName, value, selectBindParams, selectBindTypes,
-            number, field, records, exprValue, updateValue, wildcard, record;
+            number, field, records, exprValue, updateValue, wildcard, record,
+            exception, sqlExpr, namedParams, paramKey, paramKeys, paramValue;
 
         let models = intermediate["models"];
 
         if unlikely isset models[1] {
-            throw new Exception(
-                "Updating several models at the same time is still not supported"
-            );
+            throw new UpdateMultipleNotSupported();
         }
 
         let modelName = models[0];
@@ -1417,9 +1638,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                     );
 
                     if unlikely !fetch updateValue, bindParams[wildcard] {
-                        throw new Exception(
-                            "Bound parameter '" . wildcard . "' cannot be replaced because it's not in the placeholders list"
-                        );
+                        throw new BindParameterNotInPlaceholders(wildcard);
                     }
 
                     unset selectBindParams[wildcard];
@@ -1427,13 +1646,56 @@ class Query implements QueryInterface, InjectionAwareInterface
 
                     break;
 
-                case PHQL_T_BPLACEHOLDER:
-                    throw new Exception("Not supported");
-
                 default:
-                    let updateValue = new RawValue(
-                        dialect->getSqlExpression(exprValue)
-                    );
+                    let sqlExpr = dialect->getSqlExpression(exprValue);
+
+                    /**
+                     * If the expression embeds named placeholders (e.g.
+                     * "col + :inc"), resolve them from bindParams and inline
+                     * them into the expression. A RawValue is emitted as raw
+                     * SQL, so an unresolved ":inc" would mix with the positional
+                     * "?" of the primary-key WHERE clause and trigger a PDO
+                     * "mixed named and positional parameters" error.
+                     */
+                    let namedParams = [];
+
+                    if preg_match_all("/:([a-zA-Z0-9_]+)/", sqlExpr, namedParams) {
+                        /**
+                         * Sort by length descending so a short key like "id"
+                         * does not partially match a longer ":idx".
+                         */
+                        let paramKeys = array_unique(namedParams[1]);
+
+                        usort(
+                            paramKeys,
+                            function (a, b) {
+                                return strlen(b) - strlen(a);
+                            }
+                        );
+
+                        for paramKey in paramKeys {
+                            if fetch paramValue, bindParams[paramKey] {
+                                if typeof paramValue == "integer" || typeof paramValue == "double" {
+                                    let sqlExpr = preg_replace(
+                                        "/:" . preg_quote(paramKey, "/") . "\\b/",
+                                        (string) paramValue,
+                                        sqlExpr
+                                    );
+                                } else {
+                                    let sqlExpr = preg_replace(
+                                        "/:" . preg_quote(paramKey, "/") . "\\b/",
+                                        connection->escapeString((string) paramValue),
+                                        sqlExpr
+                                    );
+                                }
+
+                                unset selectBindParams[paramKey];
+                                unset selectBindTypes[paramKey];
+                            }
+                        }
+                    }
+
+                    let updateValue = new RawValue(sqlExpr);
 
                     break;
             }
@@ -1472,25 +1734,30 @@ class Query implements QueryInterface, InjectionAwareInterface
 
         records->rewind();
 
-        //for record in iterator(records) {
         while records->valid() {
-            let record = records->current();
+            try {
+                let record = records->current();
 
-            record->assign(updateValues);
+                record->assign(updateValues);
 
-            /**
-             * We apply the executed values to every record found
-             */
-            if !record->update() {
                 /**
-                 * Rollback the transaction on failure
+                 * We apply the executed values to every record found
                  */
+                if !record->update() {
+                    /**
+                     * Rollback the transaction on failure
+                     */
+                    connection->rollback();
+
+                    return new Status(false, record);
+                }
+
+                records->next();
+            } catch \PDOException, exception {
                 connection->rollback();
 
-                return new Status(false, record);
+                throw exception;
             }
-
-            records->next();
         }
 
         /**
@@ -1503,8 +1770,11 @@ class Query implements QueryInterface, InjectionAwareInterface
 
     /**
      * Resolves an expression in a single call argument
+     *
+     * @phpstan-param array<array-key, mixed> $argument
+     * @phpstan-return array<array-key, mixed>
      */
-    final protected function getCallArgument(array! argument) -> array
+    final protected function getCallArgument(array argument) -> array
     {
         if argument["type"] == PHQL_T_STARALL {
             return [
@@ -1517,8 +1787,11 @@ class Query implements QueryInterface, InjectionAwareInterface
 
     /**
      * Resolves an expression in a single call argument
+     *
+     * @phpstan-param array<array-key, mixed> $expr
+     * @phpstan-return array<string, mixed>
      */
-    final protected function getCaseExpression(array! expr) -> array
+    final protected function getCaseExpression(array expr) -> array
     {
         var whenClauses, whenExpr;
 
@@ -1548,12 +1821,17 @@ class Query implements QueryInterface, InjectionAwareInterface
 
     /**
      * Resolves an expression from its intermediate code into an array
+     *
+     * @phpstan-param array<array-key, mixed> $expr
+     * @phpstan-return array<array-key, mixed>
      */
     final protected function getExpression(array expr, bool quoting = true) -> array
     {
-        var exprType, exprLeft, exprRight, left = null, right = null,
-            listItems, exprListItem, exprReturn, value, escapedValue,
-            exprValue, valueParts, name, bindType, bind;
+        var bind, bindType, exprType, exprLeft, exprListItem, exprRight,
+            listItems, name,value, valueParts,
+            exprReturn = [],
+            left       = null,
+            right      = null;
         bool tempNotQuoting;
 
         if fetch exprType, expr["type"] {
@@ -1782,24 +2060,22 @@ class Query implements QueryInterface, InjectionAwareInterface
 
                     if quoting {
                         /**
-                         * Check if static literals have single quotes and
-                         * escape them
+                         * Keep the raw value and let the dialect escape it for
+                         * its own SQL syntax. Escaping here does not know the
+                         * target database, and a wrong escape lets the value
+                         * close the string and add SQL code.
                          */
-                        if memstr(value, "'") {
-                            let escapedValue = phalcon_orm_singlequotes(value);
-                        } else {
-                            let escapedValue = value;
-                        }
-
-                        let exprValue = "'" . escapedValue . "'";
+                        let exprReturn = [
+                            "type":   "literal",
+                            "value":  value,
+                            "escape": true
+                        ];
                     } else {
-                        let exprValue = value;
+                        let exprReturn = [
+                            "type":  "literal",
+                            "value": value
+                        ];
                     }
-
-                    let exprReturn = [
-                        "type":  "literal",
-                        "value": exprValue
-                    ];
 
                     break;
 
@@ -1893,21 +2169,15 @@ class Query implements QueryInterface, InjectionAwareInterface
                             case "array-str":
                             case "array-int":
                                 if unlikely !fetch bind, this->bindParams[name] {
-                                    throw new Exception(
-                                        "Bind value is required for array type placeholder: " . name
-                                    );
+                                    throw new BindValueRequired(name);
                                 }
 
                                 if unlikely typeof bind != "array" {
-                                    throw new Exception(
-                                        "Bind type requires an array in placeholder: " . name
-                                    );
+                                    throw new BindTypeRequiresArray(name);
                                 }
 
-                                if unlikely count(bind) < 1 {
-                                    throw new Exception(
-                                        "At least one value must be bound in placeholder: " . name
-                                    );
+                                if unlikely empty bind {
+                                    throw new EmptyArrayPlaceholderValue(name);
                                 }
 
                                 let exprReturn = [
@@ -1920,9 +2190,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                                 break;
 
                             default:
-                                throw new Exception(
-                                    "Unknown bind type: " . bindType
-                                );
+                                throw new UnknownBindType(bindType);
                         }
                     } else {
                         let exprReturn = [
@@ -2049,7 +2317,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                 case PHQL_T_BETWEEN_NOT:
                     let exprReturn = [
                         "type": "binary-op",
-                        "op":   "BETWEEN NOT",
+                        "op":   "NOT BETWEEN",
                         "left": left,
                         "right": right
                     ];
@@ -2095,6 +2363,15 @@ class Query implements QueryInterface, InjectionAwareInterface
                     break;
 
                 case PHQL_T_RAW_QUALIFIED:
+                    /**
+                     * A raw qualified name reaches this point only as a CAST
+                     * or CONVERT type. It must be a plain identifier, so a
+                     * crafted type cannot add SQL to the compiled statement.
+                     */
+                    if unlikely !preg_match("/^\\\\?[a-zA-Z_][a-zA-Z0-9_\\\\:]*$/", expr["name"]) {
+                        throw new UnsafeIdentifier(expr["name"], this->phql);
+                    }
+
                     let exprReturn = [
                         "type":  "literal",
                         "value": expr["name"]
@@ -2115,13 +2392,103 @@ class Query implements QueryInterface, InjectionAwareInterface
                 case PHQL_T_SELECT:
                     let exprReturn = [
                         "type":  "select",
-                        "value": this->_prepareSelect(expr, true)
+                        "value": this->prepareSelect(expr, true)
+                    ];
+
+                    break;
+
+                case PHQL_T_OP_MATCHES:
+                    let exprReturn = [
+                        "type":  "binary-op",
+                        "op":    "@@",
+                        "left":  left,
+                        "right": right
+                    ];
+
+                    break;
+
+                case PHQL_T_OP_CONTAINS:
+                    let exprReturn = [
+                        "type":  "binary-op",
+                        "op":    "@>",
+                        "left":  left,
+                        "right": right
+                    ];
+
+                    break;
+
+                case PHQL_T_OP_CONTAINED:
+                    let exprReturn = [
+                        "type":  "binary-op",
+                        "op":    "<@",
+                        "left":  left,
+                        "right": right
+                    ];
+
+                    break;
+
+                case PHQL_T_OP_OVERLAPS:
+                    let exprReturn = [
+                        "type":  "binary-op",
+                        "op":    "&&",
+                        "left":  left,
+                        "right": right
+                    ];
+
+                    break;
+
+                case PHQL_T_OP_CONCAT:
+                    let exprReturn = [
+                        "type":  "binary-op",
+                        "op":    "||",
+                        "left":  left,
+                        "right": right
+                    ];
+
+                    break;
+
+                case PHQL_T_OP_JSON_GET:
+                    let exprReturn = [
+                        "type":  "binary-op",
+                        "op":    "->",
+                        "left":  left,
+                        "right": right
+                    ];
+
+                    break;
+
+                case PHQL_T_OP_JSON_GET_TEXT:
+                    let exprReturn = [
+                        "type":  "binary-op",
+                        "op":    "->>",
+                        "left":  left,
+                        "right": right
+                    ];
+
+                    break;
+
+                case PHQL_T_OP_JSON_PATH:
+                    let exprReturn = [
+                        "type":  "binary-op",
+                        "op":    "#>",
+                        "left":  left,
+                        "right": right
+                    ];
+
+                    break;
+
+                case PHQL_T_OP_JSON_PATH_TEXT:
+                    let exprReturn = [
+                        "type":  "binary-op",
+                        "op":    "#>>",
+                        "left":  left,
+                        "right": right
                     ];
 
                     break;
 
                 default:
-                    throw new Exception("Unknown expression type " . exprType);
+                    throw new UnknownPhqlExpressionType(exprType);
             }
 
             return exprReturn;
@@ -2135,7 +2502,7 @@ class Query implements QueryInterface, InjectionAwareInterface
         }
 
         /**
-         * If the expression doesn't have a type it's a list of nodes
+         * If the expression does not have a type it's a list of nodes
          */
         if isset expr[0] {
             let listItems = [];
@@ -2150,17 +2517,30 @@ class Query implements QueryInterface, InjectionAwareInterface
             ];
         }
 
-        throw new Exception("Unknown expression");
+        throw new UnknownPhqlExpression();
     }
 
     /**
      * Resolves an expression in a single call argument
+     *
+     * @phpstan-param array<array-key, mixed> $expr
+     * @phpstan-return array<string, mixed>
      */
-    final protected function getFunctionCall(array! expr) -> array
+    final protected function getFunctionCall(array expr) -> array
     {
-        var arguments, argument;
+        var arguments, argument, name;
         array functionArgs;
         int distinct;
+
+        let name = expr["name"];
+
+        /**
+         * A function name must be a plain identifier, so a crafted name
+         * cannot add SQL to the compiled statement.
+         */
+        if unlikely !preg_match("/^\\\\?[a-zA-Z_][a-zA-Z0-9_\\\\:]*$/", name) {
+            throw new UnsafeIdentifier(name, this->phql);
+        }
 
         if fetch arguments, expr["arguments"] {
             if isset expr["distinct"] {
@@ -2207,8 +2587,11 @@ class Query implements QueryInterface, InjectionAwareInterface
 
     /**
      * Returns a processed group clause for a SELECT statement
+     *
+     * @phpstan-param array<array-key, mixed> $group
+     * @phpstan-return list<array<array-key, mixed>>
      */
-    final protected function getGroupClause(array! group) -> array
+    final protected function getGroupClause(array group) -> array
     {
         var groupItem;
         array groupParts;
@@ -2232,26 +2615,9 @@ class Query implements QueryInterface, InjectionAwareInterface
     }
 
     /**
-     * Returns a processed limit clause for a SELECT statement
-     */
-    final protected function getLimitClause(array! limitClause) -> array
-    {
-        var number, offset;
-        array limit = [];
-
-        if fetch number, limitClause["number"] {
-            let limit["number"] = this->getExpression(number);
-        }
-
-        if fetch offset, limitClause["offset"] {
-            let limit["offset"] = this->getExpression(offset);
-        }
-
-        return limit;
-    }
-
-    /**
      * Resolves a JOIN clause checking if the associated models exist
+     *
+     * @phpstan-param array<array-key, mixed> $join
      */
     final protected function getJoin(<ManagerInterface> manager, array join) -> array
     {
@@ -2274,45 +2640,15 @@ class Query implements QueryInterface, InjectionAwareInterface
             }
         }
 
-        throw new Exception("Corrupted SELECT AST");
-    }
-
-    /**
-     * Resolves a JOIN type
-     */
-    final protected function getJoinType(array join) -> string
-    {
-        var type;
-
-        if unlikely !fetch type, join["type"] {
-            throw new Exception("Corrupted SELECT AST");
-        }
-
-        switch type {
-            case PHQL_T_INNERJOIN:
-                return "INNER";
-
-            case PHQL_T_LEFTJOIN:
-                return "LEFT";
-
-            case PHQL_T_RIGHTJOIN:
-                return "RIGHT";
-
-            case PHQL_T_CROSSJOIN:
-                return "CROSS";
-
-            case PHQL_T_FULLJOIN:
-                return "FULL OUTER";
-        }
-
-        throw new Exception(
-            "Unknown join type " . type . ", when preparing: " . this->phql
-        );
+        throw new CorruptedSelectAst();
     }
 
     /**
      * Processes the JOINs in the query returning an internal representation for
      * the database dialect
+     *
+     * @phpstan-param mvc_query_ir $select
+     * @phpstan-return array<array-key, mixed>
      */
     final protected function getJoins(array select) -> array
     {
@@ -2386,9 +2722,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                  * Check if alias is unique
                  */
                 if unlikely isset joinModels[alias] {
-                    throw new Exception(
-                        "Cannot use '" . alias . "' as join alias because it was already used, when preparing: " . this->phql
-                    );
+                    throw new JoinAliasAlreadyUsed(alias, this->phql);
                 }
 
                 /**
@@ -2445,9 +2779,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                  * Check if alias is unique
                  */
                 if unlikely isset joinModels[realModelName] {
-                    throw new Exception(
-                        "Cannot use '" . realModelName . "' as join alias because it was already used, when preparing: " . this->phql
-                    );
+                    throw new JoinAliasAlreadyUsed(realModelName, this->phql);
                 }
 
                 /**
@@ -2592,9 +2924,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                              * More than one relation must throw an exception
                              */
                             if unlikely count(relations) != 1 {
-                                throw new Exception(
-                                    "There is more than one relation between models '" . fromModelName . "' and '" . joinModel . "', the join must be done using an alias, when preparing: " . this->phql
-                                );
+                                throw new AmbiguousJoinRelation(fromModelName, joinModel, this->phql);
                             }
 
                             /**
@@ -2673,11 +3003,69 @@ class Query implements QueryInterface, InjectionAwareInterface
     }
 
     /**
+     * Resolves a JOIN type
+     *
+     * @phpstan-param array<array-key, mixed> $join
+     */
+    final protected function getJoinType(array join) -> string
+    {
+        var type;
+
+        if unlikely !fetch type, join["type"] {
+            throw new CorruptedSelectAst();
+        }
+
+        switch type {
+            case PHQL_T_INNERJOIN:
+                return "INNER";
+
+            case PHQL_T_LEFTJOIN:
+                return "LEFT";
+
+            case PHQL_T_RIGHTJOIN:
+                return "RIGHT";
+
+            case PHQL_T_CROSSJOIN:
+                return "CROSS";
+
+            case PHQL_T_FULLJOIN:
+                return "FULL OUTER";
+        }
+
+        throw new UnknownJoinType(type, this->phql);
+    }
+
+    /**
+     * Returns a processed limit clause for a SELECT statement
+     *
+     * @phpstan-param array<array-key, mixed> $limitClause
+     * @phpstan-return array<string, mixed>
+     */
+    final protected function getLimitClause(array limitClause) -> array
+    {
+        var number, offset;
+        array limit = [];
+
+        if fetch number, limitClause["number"] {
+            let limit["number"] = this->getExpression(number);
+        }
+
+        if fetch offset, limitClause["offset"] {
+            let limit["offset"] = this->getExpression(offset);
+        }
+
+        return limit;
+    }
+
+    /**
      * Resolves joins involving many-to-many relations
      *
      * @param string joinSource
+     *
+     * @phpstan-param array<array-key, mixed>|string $joinSource
+     * @phpstan-return array<array-key, mixed>
      */
-    final protected function getMultiJoin(string! joinType, joinSource, string modelAlias, string joinAlias, <RelationInterface> relation) -> array
+    final protected function getMultiJoin(string joinType, joinSource, string modelAlias, string joinAlias, <RelationInterface> relation) -> array
     {
         var fields, referencedFields, intermediateModelName,
             intermediateModel, intermediateSource, intermediateSchema,
@@ -2751,9 +3139,7 @@ class Query implements QueryInterface, InjectionAwareInterface
         if typeof fields == "array" {
             for field, position in fields {
                 if unlikely !isset referencedFields[position] {
-                    throw new Exception(
-                        "The number of fields must be equal to the number of referenced fields in join " . modelAlias . "-" . joinAlias . ", when preparing: " . this->phql
-                    );
+                    throw new JoinFieldCountMismatch(modelAlias, joinAlias, this->phql);
                 }
 
                 /**
@@ -2785,9 +3171,7 @@ class Query implements QueryInterface, InjectionAwareInterface
 
                 //let sqlJoinPartialConditions[] = sqlEqualsJoinCondition;
             }
-
         } else {
-
             /**
              * Create the left part of the expression
              * Create the right part of the expression
@@ -2860,6 +3244,8 @@ class Query implements QueryInterface, InjectionAwareInterface
      * Returns a processed order clause for a SELECT statement
      *
      * @param array|string order
+     *
+     * @phpstan-return array<array-key, mixed>
      */
     final protected function getOrderClause(order) -> array
     {
@@ -2901,8 +3287,11 @@ class Query implements QueryInterface, InjectionAwareInterface
     /**
      * Replaces the model's name to its source name in a qualified-name
      * expression
+     *
+     * @phpstan-param array<array-key, mixed> $expr
+     * @phpstan-return array<string, mixed>
      */
-    final protected function getQualified(array! expr) -> array
+    final protected function getQualified(array expr) -> array
     {
         var columnName, nestingLevel, sqlColumnAliases, metaData, sqlAliases,
             source, sqlAliasesModelsInstances, realColumnName, columnDomain,
@@ -2941,15 +3330,13 @@ class Query implements QueryInterface, InjectionAwareInterface
              * The column has a domain, we need to check if it's an alias
              */
             if unlikely !fetch source, sqlAliases[columnDomain] {
-                throw new Exception(
-                    "Unknown model or alias '" . columnDomain . "' (11), when preparing: " . this->phql
-                );
+                throw new UnknownModelOrAlias(columnDomain, "11", this->phql);
             }
 
             /**
              * Change the selected column by its real name on its mapped table
              */
-            if globals_get("orm.column_renaming") {
+            if Settings::get("orm.column_renaming") {
                 /**
                  * Retrieve the corresponding model by its alias
                  */
@@ -2960,9 +3347,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                  * map
                  */
                 if unlikely !fetch model, sqlAliasesModelsInstances[columnDomain] {
-                    throw new Exception(
-                        "There is no model related to model or alias '" . columnDomain . "', when executing: " . this->phql
-                    );
+                    throw new NoModelForAlias(columnDomain, this->phql);
                 }
 
                 let columnMap = metaData->getReverseColumnMap(model);
@@ -2972,16 +3357,14 @@ class Query implements QueryInterface, InjectionAwareInterface
 
             if typeof columnMap == "array" {
                 if unlikely !fetch realColumnName, columnMap[columnName] {
-                    throw new Exception(
-                        "Column '" . columnName . "' doesn't belong to the model or alias '" . columnDomain . "', when executing: ". this->phql
-                    );
+                    throw new ColumnNotInDomain(columnName, columnDomain, this->phql);
                 }
             } else {
                 let realColumnName = columnName;
             }
         } else {
             /**
-             * If the column IR doesn't have a domain, we must check for
+             * If the column IR does not have a domain, we must check for
              * ambiguities
              */
             let number = 0,
@@ -2995,9 +3378,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                     let number++;
 
                     if unlikely number > 1 {
-                        throw new Exception(
-                            "The column '" . columnName . "' is ambiguous, when preparing: " . this->phql
-                        );
+                        throw new AmbiguousColumn(columnName, this->phql);
                     }
 
                     let hasModel = model;
@@ -3009,9 +3390,7 @@ class Query implements QueryInterface, InjectionAwareInterface
              * the selected models
              */
             if unlikely hasModel === false {
-                throw new Exception(
-                    "Column '" . columnName . "' doesn't belong to any of the selected models (1), when preparing: " . this->phql
-                );
+                throw new ColumnNotInSelectedModels(columnName, "1", this->phql);
             }
 
             /**
@@ -3020,9 +3399,7 @@ class Query implements QueryInterface, InjectionAwareInterface
             let models = this->models;
 
             if unlikely typeof models != "array" {
-                throw new Exception(
-                    "The models list was not loaded correctly"
-                );
+                throw new ModelsListNotLoaded();
             }
 
             /**
@@ -3031,15 +3408,13 @@ class Query implements QueryInterface, InjectionAwareInterface
             let className = get_class(hasModel);
 
             if unlikely !fetch source, models[className] {
-                throw new Exception(
-                    "Can't obtain model's source from models list: '" . className . "', when preparing: " . this->phql
-                );
+                throw new ModelSourceNotFound(className, this->phql);
             }
 
             /**
              * Rename the column
              */
-            if globals_get("orm.column_renaming") {
+            if Settings::get("orm.column_renaming") {
                 let columnMap = metaData->getReverseColumnMap(hasModel);
             } else {
                 let columnMap = null;
@@ -3050,9 +3425,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                  * The real column name is in the column map
                  */
                 if unlikely !fetch realColumnName, columnMap[columnName] {
-                    throw new Exception(
-                        "Column '" . columnName . "' doesn't belong to any of the selected models (3), when preparing: " . this->phql
-                    );
+                    throw new ColumnNotInSelectedModels(columnName, "3", this->phql);
                 }
             } else {
                 let realColumnName = columnName;
@@ -3070,10 +3443,13 @@ class Query implements QueryInterface, InjectionAwareInterface
         ];
     }
 
-
     /**
      * Gets the read connection from the model if there is no transaction set
      * inside the query object
+     *
+     * @phpstan-param mvc_query_ir|null $intermediate
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
     protected function getReadConnection(<ModelInterface> model, array intermediate = null, array bindParams = [], array bindTypes = []) -> <AdapterInterface>
     {
@@ -3094,9 +3470,7 @@ class Query implements QueryInterface, InjectionAwareInterface
             );
 
             if unlikely typeof connection != "object" {
-                throw new Exception(
-                    "selectReadConnection did not return a connection"
-                );
+                throw new ReadConnectionMissing();
             }
 
             return connection;
@@ -3109,10 +3483,14 @@ class Query implements QueryInterface, InjectionAwareInterface
      * Query the records on which the UPDATE/DELETE operation will be done
      *
      * @return ResultsetInterface
+     *
+     * @phpstan-param mvc_query_ir $intermediate
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
     final protected function getRelatedRecords(<ModelInterface> model, array intermediate, array bindParams, array bindTypes) -> <ResultsetInterface>
     {
-        var selectIr, whereConditions, limitConditions, query;
+        var selectIr, joinConditions, whereConditions, limitConditions, query;
 
         /**
          * Instead of create a PHQL string statement we manually create the IR
@@ -3129,6 +3507,14 @@ class Query implements QueryInterface, InjectionAwareInterface
             "models"  : intermediate["models"],
             "tables"  : intermediate["tables"]
         ];
+
+        /**
+         * Forward the JOINs (if any) so the related records are filtered by
+         * the joined models too (UPDATE/DELETE ... JOIN support)
+         */
+        if fetch joinConditions, intermediate["joins"] {
+            let selectIr["joins"] = joinConditions;
+        }
 
         /**
          * Check if a WHERE clause was specified
@@ -3159,8 +3545,11 @@ class Query implements QueryInterface, InjectionAwareInterface
     /**
      * Resolves a column from its intermediate representation into an array
      * used to determine if the resultset produced is simple or complex
+     *
+     * @phpstan-param array<array-key, mixed> $column
+     * @phpstan-return array<array-key, mixed>
      */
-    final protected function getSelectColumn(array! column) -> array
+    final protected function getSelectColumn(array column) -> array
     {
         var columnType, sqlAliases, modelName, source, columnDomain,
             sqlColumnAlias, preparedAlias, sqlExprColumn, sqlAliasesModels,
@@ -3168,7 +3557,7 @@ class Query implements QueryInterface, InjectionAwareInterface
         array sqlColumns, sqlColumn;
 
         if unlikely !fetch columnType, column["type"] {
-            throw new Exception("Corrupted SELECT AST");
+            throw new CorruptedSelectAst();
         }
 
         let sqlColumns = [];
@@ -3187,7 +3576,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                     "type"  : "object",
                     "model" : modelName,
                     "column": source,
-                    "balias": lcfirst(modelName)
+                    "balias": (strpos(modelName, "\\") !== false) ? modelName : lcfirst(modelName)
                 ];
 
                 if eager !== null {
@@ -3202,11 +3591,11 @@ class Query implements QueryInterface, InjectionAwareInterface
         }
 
         if unlikely !isset column["column"] {
-            throw new Exception("Corrupted SELECT AST");
+            throw new CorruptedSelectAst();
         }
 
         /**
-         * Check if selected column is qualified.*, ex: robots.*
+         * Check if selected column is qualified.*, ex: invoices.*
          */
         if columnType == PHQL_T_DOMAINALL {
             let sqlAliases = this->sqlAliases;
@@ -3217,9 +3606,7 @@ class Query implements QueryInterface, InjectionAwareInterface
             let columnDomain = column["column"];
 
             if unlikely !fetch source, sqlAliases[columnDomain] {
-                throw new Exception(
-                    "Unknown model or alias '" . columnDomain . "' (2), when preparing: " . this->phql
-                );
+                throw new UnknownModelOrAlias(columnDomain, "2", this->phql);
             }
 
             /**
@@ -3236,13 +3623,8 @@ class Query implements QueryInterface, InjectionAwareInterface
                 modelName = sqlAliasesModels[columnDomain];
 
             if typeof preparedAlias != "string" {
-
-                /**
-                 * If the best alias is the model name, we lowercase the first
-                 * letter
-                 */
                 if columnDomain == modelName {
-                    let preparedAlias = lcfirst(modelName);
+                    let preparedAlias = (strpos(modelName, "\\") !== false) ? modelName : lcfirst(modelName);
                 } else {
                     let preparedAlias = columnDomain;
                 }
@@ -3299,15 +3681,17 @@ class Query implements QueryInterface, InjectionAwareInterface
             return sqlColumns;
         }
 
-        throw new Exception("Unknown type of column " . columnType);
+        throw new UnknownColumnType(columnType);
     }
 
     /**
      * Resolves joins involving has-one/belongs-to/has-many relations
      *
      * @param string joinSource
+     *
+     * @phpstan-return array<string, mixed>
      */
-    final protected function getSingleJoin(string! joinType, joinSource, string modelAlias, string joinAlias, <RelationInterface> relation) -> array
+    final protected function getSingleJoin(string joinType, joinSource, string modelAlias, string joinAlias, <RelationInterface> relation) -> array
     {
         var fields, referencedFields, sqlJoinConditions = null,
             sqlJoinPartialConditions, position, field, referencedField;
@@ -3359,9 +3743,7 @@ class Query implements QueryInterface, InjectionAwareInterface
                  * Get the referenced field in the same position
                  */
                 if unlikely !fetch referencedField, referencedFields[position] {
-                    throw new Exception(
-                        "The number of fields must be equal to the number of referenced fields in join " . modelAlias . "-" . joinAlias . ", when preparing: " . this->phql
-                    );
+                    throw new JoinFieldCountMismatch(modelAlias, joinAlias, this->phql);
                 }
 
                 /**
@@ -3388,7 +3770,6 @@ class Query implements QueryInterface, InjectionAwareInterface
                     )
                 ];
             }
-
         }
 
         /**
@@ -3405,13 +3786,16 @@ class Query implements QueryInterface, InjectionAwareInterface
      * Resolves a table in a SELECT statement checking if the model exists
      *
      * @return string
+     *
+     * @phpstan-param array<array-key, mixed> $qualifiedName
+     * @phpstan-return array<array-key, mixed>|string
      */
     final protected function getTable(<ManagerInterface> manager, array qualifiedName)
     {
         var modelName, model, source, schema;
 
         if unlikely !fetch modelName, qualifiedName["name"] {
-            throw new Exception("Corrupted SELECT AST");
+            throw new CorruptedSelectAst();
         }
 
         let model = manager->load(modelName),
@@ -3428,6 +3812,10 @@ class Query implements QueryInterface, InjectionAwareInterface
     /**
      * Gets the write connection from the model if there is no transaction
      * inside the query object
+     *
+     * @phpstan-param mvc_query_ir|null $intermediate
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
     protected function getWriteConnection(<ModelInterface> model, array intermediate = null, array bindParams = [], array bindTypes = []) -> <AdapterInterface>
     {
@@ -3447,9 +3835,7 @@ class Query implements QueryInterface, InjectionAwareInterface
             );
 
             if unlikely typeof connection != "object" {
-                throw new Exception(
-                    "selectWriteConnection did not return a connection"
-                );
+                throw new WriteConnectionMissing();
             }
 
             return connection;
@@ -3460,8 +3846,10 @@ class Query implements QueryInterface, InjectionAwareInterface
     /**
      * Analyzes a DELETE intermediate code and produces an array to be executed
      * later
+     *
+     * @phpstan-return mvc_query_ir
      */
-    final protected function _prepareDelete() -> array
+    final protected function prepareDelete() -> array
     {
         var ast, delete, tables, models, modelsInstances, sqlTables, sqlModels,
             sqlAliases, sqlAliasesModelsInstances, deleteTables, manager, table,
@@ -3471,11 +3859,11 @@ class Query implements QueryInterface, InjectionAwareInterface
         let ast = this->ast;
 
         if unlikely !fetch delete, ast["delete"] {
-            throw new Exception("Corrupted DELETE AST");
+            throw new CorruptedDeleteAst();
         }
 
         if unlikely !fetch tables, delete["tables"] {
-            throw new Exception("Corrupted DELETE AST");
+            throw new CorruptedDeleteAst();
         }
 
         /**
@@ -3558,8 +3946,10 @@ class Query implements QueryInterface, InjectionAwareInterface
     /**
      * Analyzes an INSERT intermediate code and produces an array to be executed
      * later
+     *
+     * @phpstan-return mvc_query_ir
      */
-    final protected function _prepareInsert() -> array
+    final protected function prepareInsert() -> array
     {
         var ast, qualifiedName, manager, modelName, model, source, schema,
             exprValues, exprValue, sqlInsert, metaData, fields, sqlFields,
@@ -3569,18 +3959,18 @@ class Query implements QueryInterface, InjectionAwareInterface
         let ast = this->ast;
 
         if unlikely !isset ast["qualifiedName"] {
-            throw new Exception("Corrupted INSERT AST");
+            throw new CorruptedInsertAst();
         }
 
         if unlikely !isset ast["values"] {
-            throw new Exception("Corrupted INSERT AST");
+            throw new CorruptedInsertAst();
         }
 
         let qualifiedName = ast["qualifiedName"];
 
         // Check if the related model exists
         if unlikely !isset qualifiedName["name"] {
-            throw new Exception("Corrupted INSERT AST");
+            throw new CorruptedInsertAst();
         }
 
         let manager = this->manager,
@@ -3620,9 +4010,7 @@ class Query implements QueryInterface, InjectionAwareInterface
 
                 // Check that inserted fields are part of the model
                 if unlikely !metaData->hasAttribute(model, name) {
-                    throw new Exception(
-                        "The model '" . modelName . "' doesn't have the attribute '" . name . "', when preparing: " . this->phql
-                    );
+                    throw new MissingModelAttribute(modelName, name, this->phql);
                 }
 
                 // Add the file to the insert list
@@ -3639,22 +4027,28 @@ class Query implements QueryInterface, InjectionAwareInterface
 
     /**
      * Analyzes a SELECT intermediate code and produces an array to be executed later
+     *
+     * @phpstan-param mvc_query_ast|null $ast
+     * @phpstan-return mvc_query_ir
      */
-    final protected function _prepareSelect(var ast = null, bool merge = false) -> array
+    final protected function prepareSelect(var ast = null, bool merge = false) -> array
     {
         int position;
-        var select, tables, columns, selectedModels, manager, metaData,
-            selectedModel, qualifiedName, modelName, model, schema, source,
-            completeSource, alias, joins, sqlJoins, selectColumns,
-            sqlColumnAliases, column, sqlColumn, sqlSelect, distinct, having,
-            where, groupBy, order, limit, tempModels, tempModelsInstances,
-            tempSqlAliases, tempSqlModelsAliases,
-            tempSqlAliasesModelsInstances, tempSqlAliasesModels, with, withs,
-            withItem, automaticJoins, number, relation, joinAlias,
-            relationModel, bestAlias, eagerType;
-        array sqlModels, sqlTables, sqlAliases, sqlColumns, sqlAliasesModels,
-            sqlModelsAliases, sqlAliasesModelsInstances, models,
-            modelsInstances;
+        var alias, automaticJoins, bestAlias, column, columns, completeSource,
+            distinct, eagerType, groupBy, having, joinAlias, joins, limit,
+            manager, mergeKey, mergeValue, metaData, model, modelName, number,
+            order, qualifiedName, relation, relationModel, relations, schema, select,
+            selectColumns, selectedModel, selectedModels, source, sqlColumn,
+            sqlColumnAliases, sqlJoins, sqlSelect, tables, where, with, withItem, withs,
+            tempModels                    = [],
+            tempModelsInstances           = [],
+            tempSqlAliasesModels          = [],
+            tempSqlAliasesModelsInstances = [],
+            tempSqlModelsAliases          = [],
+            tempSqlAliases                = [];
+        array models, modelsInstances, sqlAliases, sqlAliasesModels,
+              sqlAliasesModelsInstances, sqlColumns, sqlModels, sqlModelsAliases,
+              sqlTables;
 
         if empty ast {
             let ast = this->ast;
@@ -3665,11 +4059,11 @@ class Query implements QueryInterface, InjectionAwareInterface
         }
 
         if unlikely !fetch tables, select["tables"] {
-            throw new Exception("Corrupted SELECT AST");
+            throw new CorruptedSelectAst();
         }
 
         if unlikely !fetch columns, select["columns"] {
-            throw new Exception("Corrupted SELECT AST");
+            throw new CorruptedSelectAst();
         }
 
         let this->nestingLevel++;
@@ -3734,15 +4128,11 @@ class Query implements QueryInterface, InjectionAwareInterface
             metaData = this->metaData;
 
         if unlikely typeof manager != "object" {
-            throw new Exception(
-                "A models-manager is required to execute the query"
-            );
+            throw new MissingModelsManager();
         }
 
         if unlikely typeof metaData != "object" {
-            throw new Exception(
-                "A meta-data is required to execute the query"
-            );
+            throw new MissingMetaData();
         }
 
         // Process selected models
@@ -3774,9 +4164,7 @@ class Query implements QueryInterface, InjectionAwareInterface
             if fetch alias, selectedModel["alias"] {
                 // Check if the alias was used before
                 if unlikely isset sqlAliases[alias] {
-                    throw new Exception(
-                        "Alias '" . alias . "' is used more than once, when preparing: " . this->phql
-                    );
+                    throw new DuplicateAlias(alias, this->phql);
                 }
 
                 let sqlAliases[alias] = alias,
@@ -3826,16 +4214,31 @@ class Query implements QueryInterface, InjectionAwareInterface
                             relationModel = relation->getReferencedModel(),
                             eagerType = relation->getType();
                     } else {
-                        let relation = manager->getRelationsBetween(
+                        /**
+                         * Check for relations between models. The call gives
+                         * back an array of relations, or false when the models
+                         * have none.
+                         */
+                        let relations = manager->getRelationsBetween(
                             modelName,
                             relationModel
                         );
 
-                        if unlikely typeof relation != "object" {
-                            throw new Exception(
-                                "Can't find a relationship between '" . modelName . "' and '" . relationModel . "' when preparing: " . this->phql
-                            );
+                        if unlikely typeof relations != "array" {
+                            throw new RelationshipNotFound(modelName, relationModel, this->phql);
                         }
+
+                        /**
+                         * More than one relation must throw an exception
+                         */
+                        if unlikely count(relations) != 1 {
+                            throw new AmbiguousJoinRelation(modelName, relationModel, this->phql);
+                        }
+
+                        /**
+                         * Get the first relationship
+                         */
+                        let relation = relations[0];
 
                         let bestAlias = relation->getOption("alias"),
                             relationModel = relation->getReferencedModel(),
@@ -3887,19 +4290,41 @@ class Query implements QueryInterface, InjectionAwareInterface
                 tempSqlModelsAliases = this->sqlModelsAliases,
                 tempSqlAliasesModelsInstances = this->sqlAliasesModelsInstances;
 
-            let this->models = array_merge(this->models, models),
-                this->modelsInstances = array_merge(this->modelsInstances, modelsInstances),
-                this->sqlAliases = array_merge(this->sqlAliases, sqlAliases),
-                this->sqlAliasesModels = array_merge(this->sqlAliasesModels, sqlAliasesModels),
-                this->sqlModelsAliases = array_merge(this->sqlModelsAliases, sqlModelsAliases),
-                this->sqlAliasesModelsInstances = array_merge(this->sqlAliasesModelsInstances, sqlAliasesModelsInstances);
+            /**
+             * In-place updates instead of array_merge: preserves the
+             * "right-side wins, original order kept" semantics that
+             * union (+) cannot give, with no fresh array allocation.
+             */
+            for mergeKey, mergeValue in models {
+                let this->models[mergeKey] = mergeValue;
+            }
+
+            for mergeKey, mergeValue in modelsInstances {
+                let this->modelsInstances[mergeKey] = mergeValue;
+            }
+
+            for mergeKey, mergeValue in sqlAliases {
+                let this->sqlAliases[mergeKey] = mergeValue;
+            }
+
+            for mergeKey, mergeValue in sqlAliasesModels {
+                let this->sqlAliasesModels[mergeKey] = mergeValue;
+            }
+
+            for mergeKey, mergeValue in sqlModelsAliases {
+                let this->sqlModelsAliases[mergeKey] = mergeValue;
+            }
+
+            for mergeKey, mergeValue in sqlAliasesModelsInstances {
+                let this->sqlAliasesModelsInstances[mergeKey] = mergeValue;
+            }
         }
 
         fetch joins, select["joins"];
 
         // Join existing JOINS with automatic Joins
-        if count(joins) {
-            if count(automaticJoins) {
+        if !empty joins {
+            if !empty automaticJoins {
                 if isset joins[0] {
                     let select["joins"] = array_merge(joins, automaticJoins);
                 } else {
@@ -3910,7 +4335,7 @@ class Query implements QueryInterface, InjectionAwareInterface
 
             let sqlJoins = this->getJoins(select);
         } else {
-            if count(automaticJoins) {
+            if !empty automaticJoins {
                 let select["joins"] = automaticJoins,
                     sqlJoins = this->getJoins(select);
             } else {
@@ -3967,7 +4392,7 @@ class Query implements QueryInterface, InjectionAwareInterface
             let sqlSelect["distinct"] = distinct;
         }
 
-        if count(sqlJoins) {
+        if !empty sqlJoins {
             let sqlSelect["joins"] = sqlJoins;
         }
 
@@ -4018,28 +4443,31 @@ class Query implements QueryInterface, InjectionAwareInterface
     /**
      * Analyzes an UPDATE intermediate code and produces an array to be executed
      * later
+     *
+     * @phpstan-return mvc_query_ir
      */
-    final protected function _prepareUpdate() -> array
+    final protected function prepareUpdate() -> array
     {
         var ast, update, tables, values, modelsInstances, models, sqlTables,
-            sqlAliases, sqlAliasesModelsInstances, updateTables, completeSource,
+            sqlAliases, sqlAliasesModels, sqlModelsAliases,
+            sqlAliasesModelsInstances, updateTables, completeSource,
             sqlModels, manager, table, qualifiedName, modelName, model, source,
-            schema, alias, sqlFields, sqlValues, updateValues, updateValue,
-            exprColumn, sqlUpdate, where, limit;
+            schema, alias, joins, sqlJoins, sqlFields, sqlValues, updateValues,
+            updateValue, exprColumn, sqlUpdate, where, limit;
         bool notQuoting;
 
         let ast = this->ast;
 
         if unlikely !fetch update, ast["update"] {
-            throw new Exception("Corrupted UPDATE AST");
+            throw new CorruptedUpdateAst();
         }
 
         if unlikely !fetch tables, update["tables"] {
-            throw new Exception("Corrupted UPDATE AST");
+            throw new CorruptedUpdateAst();
         }
 
         if unlikely !fetch values, update["values"] {
-            throw new Exception("Corrupted UPDATE AST");
+            throw new CorruptedUpdateAst();
         }
 
         /**
@@ -4052,6 +4480,8 @@ class Query implements QueryInterface, InjectionAwareInterface
         let sqlTables = [],
             sqlModels = [],
             sqlAliases = [],
+            sqlAliasesModels = [],
+            sqlModelsAliases = [],
             sqlAliasesModelsInstances = [];
 
         if !isset tables[0] {
@@ -4087,12 +4517,16 @@ class Query implements QueryInterface, InjectionAwareInterface
              */
             if fetch alias, table["alias"] {
                 let sqlAliases[alias] = alias,
+                    sqlAliasesModels[alias] = modelName,
+                    sqlModelsAliases[modelName] = alias,
                     completeSource[] = alias,
                     sqlTables[] = completeSource,
                     sqlAliasesModelsInstances[alias] = model,
                     models[alias] = modelName;
             } else {
                 let sqlAliases[modelName] = source,
+                    sqlAliasesModels[modelName] = modelName,
+                    sqlModelsAliases[modelName] = modelName,
                     sqlAliasesModelsInstances[modelName] = model,
                     sqlTables[] = source,
                     models[modelName] = source;
@@ -4108,7 +4542,22 @@ class Query implements QueryInterface, InjectionAwareInterface
         let this->models = models,
             this->modelsInstances = modelsInstances,
             this->sqlAliases = sqlAliases,
+            this->sqlAliasesModels = sqlAliasesModels,
+            this->sqlModelsAliases = sqlModelsAliases,
             this->sqlAliasesModelsInstances = sqlAliasesModelsInstances;
+
+        /**
+         * Process the JOINs (if any) before resolving the SET and WHERE
+         * expressions so that columns belonging to the joined models can be
+         * resolved. The joined models are registered as aliases/sources but
+         * are never added to "models", so the update still targets a single
+         * model.
+         */
+        let sqlJoins = [];
+
+        if fetch joins, update["joins"] {
+            let sqlJoins = this->getJoins(update);
+        }
 
         let sqlFields = [], sqlValues = [];
 
@@ -4136,6 +4585,10 @@ class Query implements QueryInterface, InjectionAwareInterface
             "values": sqlValues
         ];
 
+        if !empty sqlJoins {
+            let sqlUpdate["joins"] = sqlJoins;
+        }
+
         if fetch where, ast["where"] {
             let sqlUpdate["where"] = this->getExpression(where, true);
         }
@@ -4145,5 +4598,75 @@ class Query implements QueryInterface, InjectionAwareInterface
         }
 
         return sqlUpdate;
+    }
+
+    /**
+     * Refreshes the schema/source of every model referenced in a cached
+     * intermediate representation. The PHQL cache is keyed by the PHQL
+     * string only, so a model that switches its schema or source at
+     * runtime (for instance via setSchema()/setSource() in initialize())
+     * would otherwise see the value frozen at first parse. See #17020.
+     *
+     * @phpstan-param mvc_query_ir $irPhql
+     * @phpstan-return mvc_query_ir
+     */
+    final protected function refreshSchemasInIntermediate(array irPhql) -> array
+    {
+        var manager, models, tables, modelName, model, schema, source,
+            currentTable, alias, index;
+
+        let manager = this->manager;
+
+        if typeof manager != "object" {
+            return irPhql;
+        }
+
+        if !fetch models, irPhql["models"] {
+            return irPhql;
+        }
+
+        if !fetch tables, irPhql["tables"] {
+            return irPhql;
+        }
+
+        for index, modelName in models {
+            if !isset tables[index] {
+                continue;
+            }
+
+            let model = manager->load(modelName),
+                schema = model->getSchema(),
+                source = model->getSource(),
+                currentTable = tables[index],
+                alias = null;
+
+            /**
+             * Extract the alias from the cached entry (when present) so it
+             * survives the rebuild. The cached shape is either a plain
+             * source string, [source, schema], [source, null, alias] or
+             * [source, schema, alias].
+             */
+            if typeof currentTable == "array" && isset currentTable[2] {
+                let alias = currentTable[2];
+            }
+
+            if schema {
+                if alias !== null {
+                    let tables[index] = [source, schema, alias];
+                } else {
+                    let tables[index] = [source, schema];
+                }
+            } else {
+                if alias !== null {
+                    let tables[index] = [source, null, alias];
+                } else {
+                    let tables[index] = source;
+                }
+            }
+        }
+
+        let irPhql["tables"] = tables;
+
+        return irPhql;
     }
 }

@@ -10,15 +10,29 @@
 
 namespace Phalcon\Db\Adapter;
 
+use Phalcon\Config\ConfigInterface;
+use Phalcon\Contracts\Db\DbTypes;
+use Phalcon\Db\Adapter\Pdo\Mysql;
+use Phalcon\Db\Adapter\Pdo\Postgresql;
+use Phalcon\Db\Adapter\Pdo\Sqlite;
+use Phalcon\Db\Exception;
 use Phalcon\Factory\AbstractFactory;
-use Phalcon\Support\Helper\Arr\Get;
+use Phalcon\Traits\Support\Helper\Arr\GetTrait;
 
+/**
+ * @phpstan-import-type db_descriptor from DbTypes
+ * @phpstan-import-type db_factory_config from DbTypes
+ */
 class PdoFactory extends AbstractFactory
 {
+    use GetTrait;
+
     /**
      * Constructor
+     *
+     * @phpstan-param array<string, class-string<AdapterInterface>> $services
      */
-    public function __construct(array! services = [])
+    public function __construct(array services = [])
     {
         this->init(services);
     }
@@ -26,7 +40,7 @@ class PdoFactory extends AbstractFactory
     /**
      * Factory to create an instance from a Config object
      *
-     * @param array|\Phalcon\Config\Config config = [
+     * @param array<string, mixed>|ConfigInterface config = [
      *     'adapter' => 'mysql',
      *     'options' => [
      *         'host' => 'localhost',
@@ -51,15 +65,17 @@ class PdoFactory extends AbstractFactory
 
         unset config["adapter"];
 
-        let options = (new Get())->__invoke(config, "options", []);
+        let options = this->getArrVal(config, "options", []);
 
         return this->newInstance(name, options);
     }
 
     /**
      * Create a new instance of the adapter
+     *
+     * @phpstan-param db_descriptor $options
      */
-    public function newInstance(string! name, array! options = []) ->  <AdapterInterface>
+    public function newInstance(string name,  array options = []) ->  <AdapterInterface>
     {
         var definition;
 
@@ -74,24 +90,24 @@ class PdoFactory extends AbstractFactory
     }
 
     /**
-     * @return string
+     * @return class-string<\Exception>
      */
     protected function getExceptionClass() -> string
     {
-        return "Phalcon\\Db\\Exception";
+        return Exception::class;
     }
 
     /**
      * Returns the available adapters
      *
-     * @return string[]
+     * @return array<string, string>
      */
     protected function getServices() -> array
     {
         return [
-            "mysql"      : "Phalcon\\Db\\Adapter\\Pdo\\Mysql",
-            "postgresql" : "Phalcon\\Db\\Adapter\\Pdo\\Postgresql",
-            "sqlite"     : "Phalcon\\Db\\Adapter\\Pdo\\Sqlite"
+            "mysql"      : Mysql::class,
+            "postgresql" : Postgresql::class,
+            "sqlite"     : Sqlite::class
         ];
     }
 }

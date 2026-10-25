@@ -10,22 +10,10 @@
 
 namespace Phalcon\Forms\Element;
 
-use Phalcon\Tag;
-
 /**
- * Phalcon\Forms\Element\Email
- *
  * Component INPUT[type=email] for forms
  */
 class Email extends AbstractElement
 {
-    /**
-     * Renders the element widget returning HTML
-     */
-    public function render(array attributes = []) -> string
-    {
-        return Tag::emailField(
-            this->prepareAttributes(attributes)
-        );
-    }
+    protected string method = "inputEmail";
 }

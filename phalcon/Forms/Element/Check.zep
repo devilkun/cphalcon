@@ -10,22 +10,46 @@
 
 namespace Phalcon\Forms\Element;
 
-use Phalcon\Tag;
-
 /**
- * Phalcon\Forms\Element\Check
- *
  * Component INPUT[type=check] for forms
  */
 class Check extends AbstractElement
 {
+    protected string method = "inputCheckbox";
     /**
-     * Renders the element widget returning HTML
+     * @var mixed
      */
-    public function render(array attributes = []) -> string
+    protected uncheckedValue = null;
+    protected bool uncheckedValueSet = false;
+
+    /**
+     * Returns the value to bind when the checkbox is absent from submitted
+     * data. Only meaningful when hasUncheckedValue() is true.
+     */
+    public function getUncheckedValue() -> var
     {
-        return Tag::checkField(
-            this->prepareAttributes(attributes, true)
-        );
+        return this->uncheckedValue;
+    }
+
+    /**
+     * Whether an "unchecked value" has been explicitly registered.
+     */
+    public function hasUncheckedValue() -> bool
+    {
+        return this->uncheckedValueSet;
+    }
+
+    /**
+     * Registers a value to bind when the checkbox is absent from submitted
+     * data (the typical browser behavior for an unchecked input). Without
+     * this opt-in, an unchecked checkbox leaves the entity property
+     * untouched. See cphalcon issue #16982.
+     */
+    public function setUncheckedValue(var value) -> <static>
+    {
+        let this->uncheckedValue = value;
+        let this->uncheckedValueSet = true;
+
+        return this;
     }
 }

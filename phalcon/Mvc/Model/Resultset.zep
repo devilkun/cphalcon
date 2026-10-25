@@ -15,63 +15,85 @@ use Closure;
 use Countable;
 use Iterator;
 use JsonSerializable;
+use Phalcon\Cache\CacheInterface;
 use Phalcon\Db\Enum;
 use Phalcon\Messages\MessageInterface;
 use Phalcon\Mvc\Model;
+use Phalcon\Mvc\Model\Exceptions\CursorIsImmutable;
+use Phalcon\Mvc\Model\Exceptions\IndexNotInCursor;
+use Phalcon\Mvc\Model\Exceptions\InvalidResultsetCacheService;
+use Phalcon\Mvc\Model\Exceptions\InvalidReturnedRecord;
 use Phalcon\Mvc\ModelInterface;
 use Phalcon\Storage\Serializer\SerializerInterface;
-use Psr\SimpleCache\CacheInterface;
+use Phalcon\Support\Settings;
 use SeekableIterator;
-use Serializable;
 
 /**
- * Phalcon\Mvc\Model\Resultset
- *
- * This component allows to Phalcon\Mvc\Model returns large resultsets with the minimum memory consumption
- * Resultsets can be traversed using a standard foreach or a while statement. If a resultset is serialized
- * it will dump all the rows into a big array. Then unserialize will retrieve the rows as they were before
- * serializing.
+ * This component allows to Phalcon\Mvc\Model returns large resultsets with
+ * the minimum memory consumption. Resultsets can be traversed using a standard
+ * foreach or a while statement. If a resultset is serialized it will dump all
+ * the rows into a big array. Then unserialize will retrieve the rows as they
+ * were before serializing.
  *
  * ```php
  *
  * // Using a standard foreach
- * $robots = Robots::find(
+ * $invoices = Invoices::find(
  *     [
- *         "type = 'virtual'",
- *         "order" => "name",
+ *         "inv_status_flag = 1",
+ *         "order" => "inv_title",
  *     ]
  * );
  *
- * foreach ($robots as robot) {
- *     echo robot->name, "\n";
+ * foreach ($invoices as invoice) {
+ *     echo invoice->inv_title, "\n";
  * }
  *
  * // Using a while
- * $robots = Robots::find(
+ * $invoices = Invoices::find(
  *     [
- *         "type = 'virtual'",
- *         "order" => "name",
+ *         "inv_status_flag = 1",
+ *         "order" => "inv_title",
  *     ]
  * );
  *
- * $robots->rewind();
+ * $invoices->rewind();
  *
- * while ($robots->valid()) {
- *     $robot = $robots->current();
+ * while ($invoices->valid()) {
+ *     $invoice = $invoices->current();
  *
- *     echo $robot->name, "\n";
+ *     echo $invoice->inv_title, "\n";
  *
- *     $robots->next();
+ *     $invoices->next();
  * }
  * ```
+ * @template TKey of int
+ * @template TValue
+ * @implements Iterator<TKey, TValue>
+ * @implements ArrayAccess<TKey, TValue>
  */
 abstract class Resultset
-    implements ResultsetInterface, Iterator, SeekableIterator, Countable, ArrayAccess, Serializable, JsonSerializable
+    implements ResultsetInterface, Iterator, SeekableIterator, Countable, ArrayAccess, JsonSerializable
 {
+    /**
+     * @var int
+     */
     const HYDRATE_ARRAYS      = 1;
+    /**
+     * @var int
+     */
     const HYDRATE_OBJECTS     = 2;
+    /**
+     * @var int
+     */
     const HYDRATE_RECORDS     = 0;
+    /**
+     * @var int
+     */
     const TYPE_RESULT_FULL    = 0;
+    /**
+     * @var int
+     */
     const TYPE_RESULT_PARTIAL = 1;
 
     /**
@@ -85,29 +107,33 @@ abstract class Resultset
     protected cache = null;
 
     /**
-     * @var int
+     * Number of rows, or null while it has not been worked out yet. Resolved
+     * lazily by count() - asking the driver up front costs SQLite an extra
+     * statement on every single result-set.
+     *
+     * @var int|null
      */
-    protected count = 0;
+    protected count = null;
 
     /**
-     * @var array
+     * @phpstan-var array<array-key, MessageInterface>
      */
-    protected errorMessages = [];
+    protected array errorMessages = [];
+
+    protected int hydrateMode = 0;
+
+    protected bool isFresh = true;
+
+    protected int pointer = 0;
 
     /**
-     * @var int
+     * Phalcon\Db\ResultInterface or false for empty resultset
+     *
+     * @var ResultInterface|bool
+     *
+     * @phpstan-var bool|\Phalcon\Contracts\Db\Result|null
      */
-    protected hydrateMode = 0;
-
-    /**
-     * @var bool
-     */
-    protected isFresh = true;
-
-    /**
-     * @var int
-     */
-    protected pointer = 0;
+    protected result;
 
     /**
      * @var mixed|null
@@ -116,30 +142,27 @@ abstract class Resultset
 
     /**
      * @var array|null
+     *
+     * @phpstan-var array<array-key, mixed>|null
      */
     protected rows = null;
 
     /**
-     * Phalcon\Db\ResultInterface or false for empty resultset
-     *
-     * @var ResultInterface|bool
-     */
-    protected result;
-
-    /**
      * Phalcon\Mvc\Model\Resultset constructor
      *
-     * @param ResultInterface|false result
-     * @param CacheInterface|null   cache
+     * @param ResultInterface|false $result
+     * @param mixed|null            $cache
+     *
+     * @phpstan-param \Phalcon\Contracts\Db\Result|false|null $result
      */
-    public function __construct(result, <CacheInterface> cache = null)
+    public function __construct(var result, var cache = null)
     {
-        var prefetchRecords, rowCount, rows;
+        var prefetchRecords;
 
         /**
          * 'false' is given as result for empty result-sets
          */
-        if typeof result != "object" {
+        if typeof result !== "object" {
             let this->count = 0;
             let this->rows = [];
 
@@ -155,6 +178,14 @@ abstract class Resultset
          * Update the related cache if any
          */
         if cache !== null {
+            if unlikely (
+                true !== is_a(cache,  CacheInterface::class) &&
+                true !== is_a(cache,  "Psr\\SimpleCache\\CacheInterface")
+            ) {
+                throw new InvalidResultsetCacheService();
+            }
+
+
             let this->cache = cache;
         }
 
@@ -164,43 +195,57 @@ abstract class Resultset
         result->setFetchMode(Enum::FETCH_ASSOC);
 
         /**
-         * Update the row-count
+         * Consume the first row. The statement has already been executed by
+         * `Model\Query::executeSelect()`, so this costs no extra round trip,
+         * and it is the only way to tell an empty result-set from a populated
+         * one without asking the driver for a row count - which SQLite can
+         * only answer by running a second statement.
          */
-        let rowCount    = result->numRows(),
-            this->count = rowCount;
+        let this->row = result->$fetch();
 
         /**
          * Empty result-set
          */
-        if rowCount == 0 {
-            let this->rows = [];
+        if typeof this->row != "array" {
+            let this->count = 0,
+                this->rows  = [];
 
             return;
         }
 
         /**
-         * Small result-sets with less equals 32 rows are fetched at once
+         * Small result-sets with less equals 32 rows are fetched at once.
+         * The count is only worth asking for when the prefetch is switched on,
+         * which it is not by default.
          */
-        let prefetchRecords = (int) globals_get("orm.resultset_prefetch_records");
-        if prefetchRecords > 0 && rowCount <= prefetchRecords {
-            /**
-             * Fetch ALL rows from database
-             */
-            let rows = result->fetchAll();
+        let prefetchRecords = (int) Settings::get("orm.resultset_prefetch_records");
 
-            if typeof rows == "array" {
-                let this->rows = rows;
-            } else {
-                let this->rows = [];
-            }
+        if prefetchRecords > 0 && this->count() <= prefetchRecords {
+            this->materialize();
         }
     }
 
     /**
      * Counts how many rows are in the resultset
+     *
+     * @phpstan-return int
      */
     final public function count() -> int
     {
+        var result;
+
+        if this->count === null {
+            let result = this->result;
+
+            if typeof this->rows == "array" {
+                let this->count = count(this->rows);
+            } elseif typeof result == "object" {
+                let this->count = (int) result->numRows();
+            } else {
+                let this->count = 0;
+            }
+        }
+
         return this->count;
     }
 
@@ -225,7 +270,7 @@ abstract class Resultset
                  * We only can delete resultsets if every element is a complete object
                  */
                 if unlikely !method_exists(record, "getWriteConnection") {
-                    throw new Exception("The returned record is not valid");
+                    throw new InvalidReturnedRecord();
                 }
 
                 let connection = record->getWriteConnection(),
@@ -274,7 +319,7 @@ abstract class Resultset
         if transaction === true {
             connection->commit();
         }
-
+        this->refresh();
         return result;
     }
 
@@ -282,14 +327,16 @@ abstract class Resultset
      * Filters a resultset returning only those the developer requires
      *
      *```php
-     * $filtered = $robots->filter(
-     *     function ($robot) {
-     *         if ($robot->id < 3) {
-     *             return $robot;
+     * $filtered = $invoices->filter(
+     *     function ($invoice) {
+     *         if ($invoice->inv_id < 3) {
+     *             return $invoice;
      *         }
      *     }
      * );
      *```
+     *
+     * @phpstan-return list<array<array-key, mixed>|object>
      */
     public function filter(callable filter) -> <ModelInterface[]>
     {
@@ -339,21 +386,21 @@ abstract class Resultset
      * Get first row in the resultset
      *
      * ```php
-     * $model = new Robots();
+     * $model = new Invoices();
      * $manager = $model->getModelsManager();
      *
-     * // \Robots
-     * $manager->createQuery('SELECT * FROM Robots')
+     * // \Invoices
+     * $manager->createQuery('SELECT * FROM Invoices')
      *         ->execute()
      *         ->getFirst();
      *
      * // \Phalcon\Mvc\Model\Row
-     * $manager->createQuery('SELECT r.id FROM Robots AS r')
+     * $manager->createQuery('SELECT r.inv_id FROM Invoices AS r')
      *         ->execute()
      *         ->getFirst();
      *
      * // NULL
-     * $manager->createQuery('SELECT r.id FROM Robots AS r WHERE r.name = "NON-EXISTENT"')
+     * $manager->createQuery('SELECT r.inv_id FROM Invoices AS r WHERE r.inv_title = "NON-EXISTENT"')
      *         ->execute()
      *         ->getFirst();
      * ```
@@ -362,11 +409,15 @@ abstract class Resultset
      */
     public function getFirst() -> var | null
     {
-        if this->count == 0 {
+        this->seek(0);
+
+        /**
+         * Positioning at the first row already tells us whether there is one,
+         * so there is no need to work out the whole count
+         */
+        if !this->valid() {
             return null;
         }
-
-        this->seek(0);
 
         return this->{"current"}();
     }
@@ -386,7 +437,7 @@ abstract class Resultset
     {
         var count;
 
-        let count = this->count;
+        let count = this->count();
 
         if count == 0 {
             return null;
@@ -399,10 +450,17 @@ abstract class Resultset
 
     /**
      * Returns the error messages produced by a batch operation
+     *
+     * @phpstan-return array<array-key, MessageInterface>
      */
     public function getMessages() -> <MessageInterface[]>
     {
         return this->errorMessages;
+    }
+
+    public function getResult() -> var
+    {
+        return this->result;
     }
 
     /**
@@ -426,10 +484,12 @@ abstract class Resultset
      * Calls jsonSerialize on each object if present
      *
      *```php
-     * $robots = Robots::find();
+     * $invoices = Invoices::find();
      *
-     * echo json_encode($robots);
+     * echo json_encode($invoices);
      *```
+     *
+     * @phpstan-return array<array-key, mixed>
      */
     public function jsonSerialize() -> array
     {
@@ -457,6 +517,8 @@ abstract class Resultset
 
     /**
      * Gets pointer number of active row in the resultset
+     *
+     * @return TKey|null
      */
     public function key() -> int | null
     {
@@ -465,6 +527,59 @@ abstract class Resultset
         }
 
         return this->pointer;
+    }
+
+    /**
+     * Fetches every remaining row of the underlying cursor into memory,
+     * turning the resultset into TYPE_RESULT_FULL.
+     *
+     * Free when called before the cursor has been advanced: the statement has
+     * already been executed by Model\Query::executeSelect() and only the row
+     * the constructor consumed is missing from the cursor, so no re-execution
+     * takes place. Idempotent.
+     */
+    public function materialize() -> void
+    {
+        var records, result;
+
+        if typeof this->rows == "array" {
+            return;
+        }
+
+        let result = this->result;
+
+        if typeof result != "object" {
+            let this->rows = [];
+
+            return;
+        }
+
+        if this->pointer > 0 {
+            /**
+             * The cursor has been advanced past the first row, so it has to be
+             * replayed from the beginning
+             */
+            result->execute();
+
+            let records = result->fetchAll();
+        } else {
+            /**
+             * The cursor sits right behind the row the constructor consumed, so
+             * the whole set is that row followed by whatever is left
+             */
+            let records = result->fetchAll();
+
+            if typeof records != "array" {
+                let records = [];
+            }
+
+            if typeof this->row == "array" {
+                let records = array_merge([this->row], records);
+            }
+        }
+
+        let this->row  = null,
+            this->rows = typeof records == "array" ? records : [];
     }
 
     /**
@@ -479,12 +594,24 @@ abstract class Resultset
     }
 
     /**
-     * Gets row in a specific position of the resultset
+     * Checks whether offset exists in the resultset
+     *
+     * @phpstan-param int $index
      */
-    public function offsetGet(var index) -> <ModelInterface> | bool
+    public function offsetExists(var index) -> bool
     {
-        if unlikely index >= this->count {
-            throw new Exception("The index does not exist in the cursor");
+        return index < this->count();
+    }
+
+    /**
+     * Gets row in a specific position of the resultset
+     *
+     * @phpstan-param int $index
+     */
+    public function offsetGet(mixed index) -> mixed
+    {
+        if unlikely index >= this->count() {
+            throw new IndexNotInCursor();
         }
 
         /**
@@ -496,22 +623,14 @@ abstract class Resultset
     }
 
     /**
-     * Checks whether offset exists in the resultset
-     */
-    public function offsetExists(var index) -> bool
-    {
-        return index < this->count;
-    }
-
-    /**
      * Resultsets cannot be changed. It has only been implemented to meet the definition of the ArrayAccess interface
      *
-     * @param int index
+     * @param int offset
      * @param \Phalcon\Mvc\ModelInterface value
      */
-    public function offsetSet(var index, var value) -> void
+    public function offsetSet(var offset, var value) -> void
     {
-        throw new Exception("Cursor is an immutable ArrayAccess object");
+        throw new CursorIsImmutable();
     }
 
     /**
@@ -519,7 +638,65 @@ abstract class Resultset
      */
     public function offsetUnset(var offset) -> void
     {
-        throw new Exception("Cursor is an immutable ArrayAccess object");
+        throw new CursorIsImmutable();
+    }
+
+    public function refresh() -> bool
+    {
+        var prefetchRecords, result, success;
+
+        /**
+         * 'false' is given as result for empty result-sets
+         */
+        if typeof this->result !== "object" {
+            let this->count = 0;
+            let this->rows = [];
+
+            return true;
+        }
+        let result = this->result;
+        let success = result->execute();
+        if false === success {
+            return false;
+        }
+
+        /**
+         * The statement has been replayed, so everything derived from the
+         * previous run has to go - including the cursor position
+         */
+        let this->isFresh   = true,
+            this->count     = null,
+            this->rows      = null,
+            this->row       = null,
+            this->activeRow = null,
+            this->pointer   = 0;
+
+        /**
+         * Consume the first row to tell an empty result-set from a populated
+         * one, the same way the constructor does
+         */
+        let this->row = result->$fetch();
+
+        /**
+         * Empty result-set
+         */
+        if typeof this->row != "array" {
+            let this->count = 0,
+                this->rows  = [];
+
+            return true;
+        }
+
+        /**
+         * Small result-sets with less equals 32 rows are fetched at once
+         */
+        let prefetchRecords = (int) Settings::get("orm.resultset_prefetch_records");
+
+        if prefetchRecords > 0 && this->count() <= prefetchRecords {
+            this->materialize();
+        }
+
+        return true;
     }
 
     /**
@@ -533,6 +710,8 @@ abstract class Resultset
     /**
      * Changes the internal pointer to a specific position in the resultset.
      * Set the new position if required, and then set this->row
+     *
+     * @phpstan-param int $position
      */
     final public function seek(var position) -> void
     {
@@ -545,6 +724,12 @@ abstract class Resultset
                  */
                 if fetch row, this->rows[position] {
                     let this->row = row;
+                } else {
+                    /**
+                     * Past the end - the previous row must not be left behind
+                     * as the current one
+                     */
+                    let this->row = false;
                 }
 
                 let this->pointer = position;
@@ -618,6 +803,8 @@ abstract class Resultset
      * Updates every record in the resultset
      *
      * @param array data
+     *
+     * @phpstan-param array<array-key, mixed> $data
      */
     public function update(var data, <Closure> conditionCallback = null) -> bool
     {
@@ -636,7 +823,7 @@ abstract class Resultset
                  * We only can update resultsets if every element is a complete object
                  */
                 if unlikely !method_exists(record, "getWriteConnection") {
-                    throw new Exception("The returned record is not valid");
+                    throw new InvalidReturnedRecord();
                 }
 
                 let connection = record->getWriteConnection(),
@@ -686,15 +873,32 @@ abstract class Resultset
         if transaction === true {
             connection->commit();
         }
-
+        this->refresh();
         return transaction;
     }
 
     /**
      * Check whether internal resource has rows to fetch
+     *
+     * Driven by the row the cursor is parked on rather than by the count, so
+     * that a plain traversal never has to ask the driver how many rows there
+     * are - on SQLite that answer costs a second statement.
      */
     public function valid() -> bool
     {
-        return this->pointer < this->count;
+        /**
+         * Nothing has been fetched yet, or the rows have just been pulled into
+         * memory - position the cursor before reporting
+         */
+        if this->row === null {
+            this->seek(this->pointer);
+        }
+
+        /**
+         * `null` and `false` are the two sentinels seek() leaves behind for
+         * "no row here". The row itself can be of any type - an unserialised
+         * complex resultset holds rows that are already hydrated objects.
+         */
+        return this->row !== null && this->row !== false;
     }
 }

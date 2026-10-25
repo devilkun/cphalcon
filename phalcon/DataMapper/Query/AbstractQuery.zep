@@ -10,36 +10,34 @@
  * Implementation of this file has been influenced by AtlasPHP
  *
  * @link    https://github.com/atlasphp/Atlas.Query
- * @license https://github.com/atlasphp/Atlas.Qyert/blob/1.x/LICENSE.md
+ * @license https://github.com/atlasphp/Atlas.Query/blob/1.x/LICENSE.md
  */
 
 namespace Phalcon\DataMapper\Query;
 
+use Phalcon\Contracts\DataMapper\DataMapperTypes;
 use Phalcon\DataMapper\Pdo\Connection;
 
 /**
  * Class AbstractQuery
  *
- * @property Bind       $bind
- * @property Connection $connection
- * @property array      $store
+ * @phpstan-import-type datamapper_bind_store from DataMapperTypes
+ * @phpstan-import-type datamapper_bind_values from DataMapperTypes
+ * @phpstan-import-type datamapper_clauses from DataMapperTypes
+ * @phpstan-import-type datamapper_query_store from DataMapperTypes
  */
 abstract class AbstractQuery
 {
-    /**
-     * @var Bind
-     */
-    protected bind;
-
-    /**
-     * @var Connection
-     */
-    protected connection;
+    protected <Bind> bind;
+    protected <Connection> connection;
 
     /**
      * @var array
+     *
+     * @phpstan-var datamapper_query_store
+     * @psalm-suppress InvalidPropertyAssignmentValue
      */
-    protected store = [];
+    protected array store = [];
 
     /**
      * AbstractQuery constructor.
@@ -58,11 +56,6 @@ abstract class AbstractQuery
 
     /**
      * Binds a value inline
-     *
-     * @param mixed $value
-     * @param int   $type
-     *
-     * @return string
      */
     public function bindInline(var value, int type = -1) -> string
     {
@@ -94,6 +87,8 @@ abstract class AbstractQuery
      * @param array $values
      *
      * @return AbstractQuery
+     *
+     * @phpstan-param datamapper_bind_values $values
      */
     public function bindValues(array values) -> <AbstractQuery>
     {
@@ -105,7 +100,7 @@ abstract class AbstractQuery
     /**
      * Returns all the bound values
      *
-     * @return array
+     * @phpstan-return datamapper_bind_store
      */
     public function getBindValues() -> array
     {
@@ -114,8 +109,6 @@ abstract class AbstractQuery
 
     /**
      * Return the generated statement
-     *
-     * @return string
      */
     abstract public function getStatement() -> string;
 
@@ -133,10 +126,98 @@ abstract class AbstractQuery
     }
 
     /**
+     * Quotes the identifier
+     */
+    public function quoteIdentifier(
+        string name,
+        int type = \PDO::PARAM_STR
+    ) -> string {
+        return this->connection->quote(name, type);
+    }
+
+    /**
+     * Resets the internal array
+     */
+    public function reset() -> void
+    {
+        let this->store["COLUMNS"] = [],
+            this->store["FLAGS"]   = [],
+            this->store["FROM"]    = [],
+            this->store["GROUP"]   = [],
+            this->store["HAVING"]  = [],
+            this->store["LIMIT"]   = 0,
+            this->store["ORDER"]   = [],
+            this->store["OFFSET"]  = 0,
+            this->store["WHERE"]   = [];
+    }
+
+    /**
+     * Resets the columns
+     */
+    public function resetColumns() -> void
+    {
+        let this->store["COLUMNS"] = [];
+    }
+
+    /**
+     * Resets the flags
+     */
+    public function resetFlags() -> void
+    {
+        let this->store["FLAGS"] = [];
+    }
+
+    /**
+     * Resets the from
+     */
+    public function resetFrom() -> void
+    {
+        let this->store["FROM"] = [];
+    }
+
+    /**
+     * Resets the group by
+     */
+    public function resetGroupBy() -> void
+    {
+        let this->store["GROUP"] = [];
+    }
+
+    /**
+     * Resets the having
+     */
+    public function resetHaving() -> void
+    {
+        let this->store["HAVING"] = [];
+    }
+
+    /**
+     * Resets the limit and offset
+     */
+    public function resetLimit() -> void
+    {
+        let this->store["LIMIT"]  = 0,
+            this->store["OFFSET"] = 0;
+    }
+
+    /**
+     * Resets the order by
+     */
+    public function resetOrderBy() -> void
+    {
+        let this->store["ORDER"] = [];
+    }
+
+    /**
+     * Resets the where
+     */
+    public function resetWhere() -> void
+    {
+        let this->store["WHERE"] = [];
+    }
+
+    /**
      * Sets a flag for the query such as "DISTINCT"
-     *
-     * @param string $flag
-     * @param bool   $enable
      */
     public function setFlag(string flag, bool enable = true) -> void
     {
@@ -151,37 +232,6 @@ abstract class AbstractQuery
 
             let this->store["FLAGS"] = flags;
         }
-    }
-
-    /**
-     * Quotes the identifier
-     *
-     * @param string $name
-     * @param int    $type
-     *
-     * @return string
-     */
-    public function quoteIdentifier(
-        string name,
-        int type = \PDO::PARAM_STR
-    ) -> string {
-        return this->connection->quote(name, type);
-    }
-
-    /**
-     * Resets the internal array
-     */
-    public function reset()
-    {
-        let this->store["COLUMNS"] = [],
-            this->store["FLAGS"]   = [],
-            this->store["FROM"]    = [],
-            this->store["GROUP"]   = [],
-            this->store["HAVING"]  = [],
-            this->store["LIMIT"]   = 0,
-            this->store["ORDER"]   = [],
-            this->store["OFFSET"]  = 0,
-            this->store["WHERE"]   = [];
     }
 
     /**
@@ -200,8 +250,6 @@ abstract class AbstractQuery
 
     /**
      * Builds the `RETURNING` clause
-     *
-     * @return string
      */
     protected function buildReturning() -> string
     {
@@ -215,10 +263,7 @@ abstract class AbstractQuery
     /**
      * Indents a collection
      *
-     * @param array  $collection
-     * @param string $glue
-     *
-     * @return string
+     * @phpstan-param datamapper_clauses $collection
      */
     protected function indent(array collection, string glue = "") -> string
     {

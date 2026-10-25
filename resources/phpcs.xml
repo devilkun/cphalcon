@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<ruleset name="Phalcon">
+    <description>Phalcon Coding Standards</description>
+
+    <!-- Arguments:
+         p = Show progress
+         s = Show sniff codes in output
+         colors = Force color output (optional, often auto-detected)
+    -->
+    <arg name="colors"/>
+    <arg value="ps"/>
+
+    <rule ref="Phalcon"/>
+
+    <!-- Files to scan -->
+    <file>../tests/benchmarks</file>
+    <file>../tests/database</file>
+    <file>../tests/unit</file>
+</ruleset>

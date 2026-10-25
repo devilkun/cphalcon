@@ -23,13 +23,11 @@
  * file that was distributed with this source code.
  */
 /**
- * Phalcon\Translate\Exception
- *
  * Class for exceptions thrown by Phalcon\Translate
  */
 ZEPHIR_INIT_CLASS(Phalcon_Translate_Exception)
 {
-	ZEPHIR_REGISTER_CLASS_EX(Phalcon\\Translate, Exception, phalcon, translate_exception, phalcon_exception_ce, NULL, 0);
+	ZEPHIR_REGISTER_CLASS_EX(Phalcon\\Translate, Exception, phalcon, translate_exception, zend_ce_exception, NULL, 0);
 
 	return SUCCESS;
 }

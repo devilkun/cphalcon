@@ -16,8 +16,7 @@
 #include "kernel/fcall.h"
 #include "kernel/array.h"
 #include "kernel/object.h"
-#include "ext/spl/spl_exceptions.h"
-#include "kernel/exception.h"
+#include "kernel/operators.h"
 
 
 /**
@@ -48,6 +47,8 @@
  *     ]
  * );
  *```
+ *
+ * @phpstan-import-type storage_adapter_options from StorageTypes
  */
 ZEPHIR_INIT_CLASS(Phalcon_Mvc_Model_MetaData_Redis)
 {
@@ -59,7 +60,7 @@ ZEPHIR_INIT_CLASS(Phalcon_Mvc_Model_MetaData_Redis)
 /**
  * Phalcon\Mvc\Model\MetaData\Redis constructor
  *
- * @param array options
+ * @param array<string, mixed> $options
  */
 PHP_METHOD(Phalcon_Mvc_Model_MetaData_Redis, __construct)
 {
@@ -77,44 +78,43 @@ PHP_METHOD(Phalcon_Mvc_Model_MetaData_Redis, __construct)
 	ZVAL_UNDEF(&_4);
 	ZVAL_UNDEF(&_5);
 	ZVAL_UNDEF(&options);
-#if PHP_VERSION_ID >= 80000
-	bool is_null_true = 1;
+	static zend_string *_zephir_prop_0 = NULL;
+	if (UNEXPECTED(!_zephir_prop_0)) {
+		_zephir_prop_0 = zend_string_init("adapter", 7, 1);
+	}
+
 	ZEND_PARSE_PARAMETERS_START(1, 2)
 		Z_PARAM_OBJECT_OF_CLASS(factory, phalcon_cache_adapterfactory_ce)
 		Z_PARAM_OPTIONAL
-		Z_PARAM_ARRAY(options)
+		ZEPHIR_Z_PARAM_ARRAY(options, options_param)
 	ZEND_PARSE_PARAMETERS_END();
-#endif
-
-
-	ZEPHIR_MM_GROW();
+	ZEPHIR_METHOD_GLOBALS_PTR = pecalloc(1, sizeof(zephir_method_globals), 0);
+	zephir_memory_grow_stack(ZEPHIR_METHOD_GLOBALS_PTR, __func__);
 	zephir_fetch_params(1, 1, 1, &factory, &options_param);
 	if (!options_param) {
 		ZEPHIR_INIT_VAR(&options);
 		array_init(&options);
 	} else {
-	ZEPHIR_OBS_COPY_OR_DUP(&options, options_param);
+		zephir_get_arrval(&options, options_param);
 	}
-
-
 	ZEPHIR_INIT_VAR(&_1);
 	ZVAL_STRING(&_1, "prefix");
 	ZEPHIR_INIT_VAR(&_2);
 	ZVAL_STRING(&_2, "ph-mm-reds-");
-	ZEPHIR_CALL_METHOD(&_0, this_ptr, "getarrval", NULL, 0, &options, &_1, &_2);
+	ZEPHIR_CALL_METHOD(&_0, this_ptr, "getArrVal", NULL, 0, &options, &_1, &_2);
 	zephir_check_call_status();
 	zephir_array_update_string(&options, SL("prefix"), &_0, PH_COPY | PH_SEPARATE);
 	ZEPHIR_INIT_NVAR(&_1);
 	ZVAL_STRING(&_1, "lifetime");
 	ZVAL_LONG(&_4, 172800);
-	ZEPHIR_CALL_METHOD(&_3, this_ptr, "getarrval", NULL, 0, &options, &_1, &_4);
+	ZEPHIR_CALL_METHOD(&_3, this_ptr, "getArrVal", NULL, 0, &options, &_1, &_4);
 	zephir_check_call_status();
 	zephir_array_update_string(&options, SL("lifetime"), &_3, PH_COPY | PH_SEPARATE);
 	ZEPHIR_INIT_NVAR(&_1);
 	ZVAL_STRING(&_1, "redis");
-	ZEPHIR_CALL_METHOD(&_5, factory, "newinstance", NULL, 0, &_1, &options);
+	ZEPHIR_CALL_METHOD(&_5, factory, "newInstance", NULL, 0, &_1, &options);
 	zephir_check_call_status();
-	zephir_update_property_zval(this_ptr, ZEND_STRL("adapter"), &_5);
+	zephir_update_property_zval_cached(this_ptr, _zephir_prop_0, 1068, &_5);
 	ZEPHIR_MM_RESTORE();
 }
 
@@ -125,19 +125,21 @@ PHP_METHOD(Phalcon_Mvc_Model_MetaData_Redis, reset)
 {
 	zval _0;
 	zephir_method_globals *ZEPHIR_METHOD_GLOBALS_PTR = NULL;
-	zephir_fcall_cache_entry *_1 = NULL;
 	zend_long ZEPHIR_LAST_CALL_STATUS;
 	zval *this_ptr = getThis();
 
 	ZVAL_UNDEF(&_0);
+	static zend_string *_zephir_prop_0 = NULL;
+	if (UNEXPECTED(!_zephir_prop_0)) {
+		_zephir_prop_0 = zend_string_init("adapter", 7, 1);
+	}
+	ZEPHIR_METHOD_GLOBALS_PTR = pecalloc(1, sizeof(zephir_method_globals), 0);
+	zephir_memory_grow_stack(ZEPHIR_METHOD_GLOBALS_PTR, __func__);
 
-
-	ZEPHIR_MM_GROW();
-
-	zephir_read_property(&_0, this_ptr, ZEND_STRL("adapter"), PH_NOISY_CC | PH_READONLY);
+	zephir_read_property_cached(&_0, this_ptr, _zephir_prop_0, 1068, PH_NOISY_CC | PH_READONLY);
 	ZEPHIR_CALL_METHOD(NULL, &_0, "clear", NULL, 0);
 	zephir_check_call_status();
-	ZEPHIR_CALL_PARENT(NULL, phalcon_mvc_model_metadata_redis_ce, getThis(), "reset", &_1, 0);
+	ZEPHIR_CALL_PARENT(NULL, phalcon_mvc_model_metadata_redis_ce, getThis(), "reset", NULL, 0);
 	zephir_check_call_status();
 	ZEPHIR_MM_RESTORE();
 }

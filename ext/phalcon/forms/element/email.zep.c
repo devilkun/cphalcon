@@ -12,10 +12,6 @@
 #include <Zend/zend_interfaces.h>
 
 #include "kernel/main.h"
-#include "kernel/fcall.h"
-#include "kernel/memory.h"
-#include "kernel/operators.h"
-#include "kernel/object.h"
 
 
 /**
@@ -27,54 +23,18 @@
  * file that was distributed with this source code.
  */
 /**
- * Phalcon\Forms\Element\Email
- *
  * Component INPUT[type=email] for forms
  */
 ZEPHIR_INIT_CLASS(Phalcon_Forms_Element_Email)
 {
-	ZEPHIR_REGISTER_CLASS_EX(Phalcon\\Forms\\Element, Email, phalcon, forms_element_email, phalcon_forms_element_abstractelement_ce, phalcon_forms_element_email_method_entry, 0);
+	ZEPHIR_REGISTER_CLASS_EX(Phalcon\\Forms\\Element, Email, phalcon, forms_element_email, phalcon_forms_element_abstractelement_ce, NULL, 0);
 
-	return SUCCESS;
-}
-
-/**
- * Renders the element widget returning HTML
- */
-PHP_METHOD(Phalcon_Forms_Element_Email, render)
-{
-	zephir_method_globals *ZEPHIR_METHOD_GLOBALS_PTR = NULL;
-	zend_long ZEPHIR_LAST_CALL_STATUS;
-	zephir_fcall_cache_entry *_0 = NULL;
-	zval *attributes_param = NULL, _1;
-	zval attributes;
-	zval *this_ptr = getThis();
-
-	ZVAL_UNDEF(&attributes);
-	ZVAL_UNDEF(&_1);
-#if PHP_VERSION_ID >= 80000
-	bool is_null_true = 1;
-	ZEND_PARSE_PARAMETERS_START(0, 1)
-		Z_PARAM_OPTIONAL
-		Z_PARAM_ARRAY(attributes)
-	ZEND_PARSE_PARAMETERS_END();
-#endif
-
-
-	ZEPHIR_MM_GROW();
-	zephir_fetch_params(1, 0, 1, &attributes_param);
-	if (!attributes_param) {
-		ZEPHIR_INIT_VAR(&attributes);
-		array_init(&attributes);
-	} else {
-		zephir_get_arrval(&attributes, attributes_param);
+	{
+		zval _zc0;
+		ZVAL_STRINGL(&_zc0, "inputEmail", sizeof("inputEmail") - 1);
+		zephir_declare_typed_property(phalcon_forms_element_email_ce, SL("method"), &_zc0, ZEND_ACC_PROTECTED, MAY_BE_STRING, NULL, 0);
 	}
 
-
-	ZEPHIR_CALL_METHOD(&_1, this_ptr, "prepareattributes", NULL, 0, &attributes);
-	zephir_check_call_status();
-	ZEPHIR_RETURN_CALL_CE_STATIC(phalcon_tag_ce, "emailfield", &_0, 0, &_1);
-	zephir_check_call_status();
-	RETURN_MM();
+	return SUCCESS;
 }
 

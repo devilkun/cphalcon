@@ -10,16 +10,24 @@
 
 namespace Phalcon\Mvc\Model\MetaData\Strategy;
 
-use Phalcon\Di\DiInterface;
+use Phalcon\Contracts\Mvc\MvcTypes;
 use Phalcon\Db\Column;
-use Phalcon\Mvc\ModelInterface;
+use Phalcon\Di\DiInterface;
 use Phalcon\Mvc\Model\MetaData;
-use Phalcon\Mvc\Model\Exception;
+use Phalcon\Mvc\Model\MetaData\Exceptions\InvalidContainer;
+use Phalcon\Mvc\Model\MetaData\Exceptions\NoAnnotationsForClass;
+use Phalcon\Mvc\Model\MetaData\Exceptions\NoPropertyAnnotationsForClass;
+use Phalcon\Mvc\ModelInterface;
 
+/**
+ * @phpstan-import-type mvc_metadata_index from MvcTypes
+ */
 class Annotations implements StrategyInterface
 {
     /**
      * Read the model's column map, this can't be inferred
+     *
+     * @phpstan-return mvc_metadata_index
      */
     final public function getColumnMaps(<ModelInterface> model, <DiInterface> container) -> array
     {
@@ -29,7 +37,7 @@ class Annotations implements StrategyInterface
         bool hasReversedColumn;
 
         if unlikely typeof container != "object" {
-            throw new Exception("The dependency injector is invalid");
+            throw new InvalidContainer();
         }
 
         let annotations = container->get("annotations");
@@ -38,9 +46,7 @@ class Annotations implements StrategyInterface
             reflection = annotations->get(className);
 
         if unlikely typeof reflection != "object" {
-            throw new Exception(
-                "No annotations were found in class " . className
-            );
+            throw new NoAnnotationsForClass(className);
         }
 
         /**
@@ -48,10 +54,8 @@ class Annotations implements StrategyInterface
          */
         let propertiesAnnotations = reflection->getPropertiesAnnotations();
 
-        if unlikely !count(propertiesAnnotations) {
-            throw new Exception(
-                "No properties with annotations were found in class " . className
-            );
+        if unlikely empty propertiesAnnotations {
+            throw new NoPropertyAnnotationsForClass(className);
         }
 
         let orderedColumnMap = [],
@@ -100,6 +104,8 @@ class Annotations implements StrategyInterface
 
     /**
      * The meta-data is obtained by reading the column descriptions from the database information schema
+     *
+     * @phpstan-return mvc_metadata_index
      */
     final public function getMetaData(<ModelInterface> model, <DiInterface> container) -> array
     {
@@ -110,7 +116,7 @@ class Annotations implements StrategyInterface
             emptyStringValues, skipOnInsert, skipOnUpdate;
 
         if unlikely typeof container != "object" {
-            throw new Exception("The dependency injector is invalid");
+            throw new InvalidContainer();
         }
 
         let annotations = container->get("annotations");
@@ -119,9 +125,7 @@ class Annotations implements StrategyInterface
             reflection = annotations->get(className);
 
         if unlikely typeof reflection != "object" {
-            throw new Exception(
-                "No annotations were found in class " . className
-            );
+            throw new NoAnnotationsForClass(className);
         }
 
         /**
@@ -129,10 +133,8 @@ class Annotations implements StrategyInterface
          */
         let propertiesAnnotations = reflection->getPropertiesAnnotations();
 
-        if unlikely !count(propertiesAnnotations) {
-            throw new Exception(
-                "No properties with annotations were found in class " . className
-            );
+        if unlikely empty propertiesAnnotations {
+            throw new NoPropertyAnnotationsForClass(className);
         }
 
         /**
@@ -348,23 +350,29 @@ class Annotations implements StrategyInterface
 
             /**
              * Column will be skipped on INSERT operation
+             *
+             * A docblock writes snake_case. An attribute writes camelCase,
+             * because PSR-12 does not allow snake_case parameter names.
              */
-            if columnAnnotation->getNamedParameter("skip_on_insert") {
-                let skipOnInsert[] = columnName;
+            if columnAnnotation->getNamedParameter("skip_on_insert") ||
+               columnAnnotation->getNamedParameter("skipOnInsert") {
+                let skipOnInsert[columnName] = true;
             }
 
             /**
              * Column will be skipped on UPDATE operation
              */
-            if columnAnnotation->getNamedParameter("skip_on_update") {
-                let skipOnUpdate[] = columnName;
+            if columnAnnotation->getNamedParameter("skip_on_update") ||
+               columnAnnotation->getNamedParameter("skipOnUpdate") {
+                let skipOnUpdate[columnName] = true;
             }
 
             /**
              * Allow empty strings for column
              */
-            if columnAnnotation->getNamedParameter("allow_empty_string") {
-                let emptyStringValues[] = columnName;
+            if columnAnnotation->getNamedParameter("allow_empty_string") ||
+               columnAnnotation->getNamedParameter("allowEmptyString") {
+                let emptyStringValues[columnName] = columnName;
             }
 
             /**
@@ -379,6 +387,15 @@ class Annotations implements StrategyInterface
              * value is null
              */
             let defaultValue = columnAnnotation->getNamedParameter("default");
+
+            /**
+             * `default` is a Zephir keyword, so the attribute names it
+             * `defaultValue`.
+             */
+            if defaultValue === null {
+                let defaultValue = columnAnnotation->getNamedParameter("defaultValue");
+            }
+
             if defaultValue !== null || columnAnnotation->getNamedParameter("nullable") {
                 let defaultValues[columnName] = defaultValue;
             }

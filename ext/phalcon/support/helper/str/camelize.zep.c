@@ -12,16 +12,15 @@
 #include <Zend/zend_interfaces.h>
 
 #include "kernel/main.h"
+#include "kernel/operators.h"
 #include "kernel/memory.h"
-#include "kernel/concat.h"
 #include "kernel/fcall.h"
 #include "kernel/object.h"
 #include "kernel/string.h"
-#include "kernel/operators.h"
 
 
 /**
- * This file is part of the Phalcon.
+ * This file is part of the Phalcon Framework.
  *
  * (c) Phalcon Team <team@phalcon.io>
  *
@@ -29,7 +28,7 @@
  * file that was distributed with this source code.
  */
 /**
- * Converts strings to camelize style
+ * Converts strings to upperCamelCase or lowerCamelCase
  */
 ZEPHIR_INIT_CLASS(Phalcon_Support_Helper_Str_Camelize)
 {
@@ -41,6 +40,7 @@ ZEPHIR_INIT_CLASS(Phalcon_Support_Helper_Str_Camelize)
 /**
  * @param string      $text
  * @param string|null $delimiters
+ * @param bool        $lowerFirst
  *
  * @return string
  */
@@ -48,57 +48,106 @@ PHP_METHOD(Phalcon_Support_Helper_Str_Camelize, __invoke)
 {
 	zephir_method_globals *ZEPHIR_METHOD_GLOBALS_PTR = NULL;
 	zend_long ZEPHIR_LAST_CALL_STATUS;
-	zval *text_param = NULL, *delimiters_param = NULL, delims, exploded, output, _0, _1, _2, _3;
-	zval text, delimiters;
+	zend_bool lowerFirst;
+	zval delimiters;
+	zval text_zv, *delimiters_param = NULL, *lowerFirst_param = NULL, _0;
+	zend_string *text = NULL;
 	zval *this_ptr = getThis();
 
-	ZVAL_UNDEF(&text);
-	ZVAL_UNDEF(&delimiters);
-	ZVAL_UNDEF(&delims);
-	ZVAL_UNDEF(&exploded);
-	ZVAL_UNDEF(&output);
+	ZVAL_UNDEF(&text_zv);
 	ZVAL_UNDEF(&_0);
-	ZVAL_UNDEF(&_1);
-	ZVAL_UNDEF(&_2);
-	ZVAL_UNDEF(&_3);
-#if PHP_VERSION_ID >= 80000
+	ZVAL_UNDEF(&delimiters);
 	bool is_null_true = 1;
-	ZEND_PARSE_PARAMETERS_START(1, 2)
+	ZEND_PARSE_PARAMETERS_START(1, 3)
 		Z_PARAM_STR(text)
 		Z_PARAM_OPTIONAL
-		Z_PARAM_STR_OR_NULL(delimiters)
+		Z_PARAM_ZVAL_OR_NULL(delimiters_param)
+		Z_PARAM_BOOL(lowerFirst)
 	ZEND_PARSE_PARAMETERS_END();
-#endif
-
-
-	ZEPHIR_MM_GROW();
-	zephir_fetch_params(1, 1, 1, &text_param, &delimiters_param);
-	zephir_get_strval(&text, text_param);
+	ZEPHIR_METHOD_GLOBALS_PTR = pecalloc(1, sizeof(zephir_method_globals), 0);
+	zephir_memory_grow_stack(ZEPHIR_METHOD_GLOBALS_PTR, __func__);
+	if (ZEND_NUM_ARGS() > 1) {
+		delimiters_param = ZEND_CALL_ARG(execute_data, 2);
+	}
+	if (ZEND_NUM_ARGS() > 2) {
+		lowerFirst_param = ZEND_CALL_ARG(execute_data, 3);
+	}
+	zephir_memory_observe(&text_zv);
+	ZVAL_STR_COPY(&text_zv, text);
 	if (!delimiters_param) {
 		ZEPHIR_INIT_VAR(&delimiters);
 	} else {
 		zephir_get_strval(&delimiters, delimiters_param);
 	}
-
-
-	if (!(!(ZEPHIR_IS_EMPTY(&delimiters)))) {
-		ZEPHIR_INIT_VAR(&delims);
-		ZVAL_STRING(&delims, "_-");
+	if (!lowerFirst_param) {
+		lowerFirst = 0;
 	} else {
-		ZEPHIR_CPY_WRT(&delims, &delimiters);
+		}
+	if (ZEPHIR_IS_NULL(&delimiters)) {
+		ZEPHIR_INIT_NVAR(&delimiters);
+		ZVAL_STRING(&delimiters, "-_");
 	}
-	ZEPHIR_INIT_VAR(&_0);
-	ZEPHIR_CONCAT_SVS(&_0, "/[", &delims, "]+/");
-	ZVAL_LONG(&_1, -1);
-	ZVAL_LONG(&_2, (2 | 1));
-	ZEPHIR_CALL_FUNCTION(&exploded, "preg_split", NULL, 106, &_0, &text, &_1, &_2);
+	if (lowerFirst) {
+		ZVAL_BOOL(&_0, 1);
+	} else {
+		ZVAL_BOOL(&_0, 0);
+	}
+	ZEPHIR_RETURN_CALL_METHOD(this_ptr, "toCamelize", NULL, 0, &text_zv, &delimiters, &_0);
 	zephir_check_call_status();
-	ZEPHIR_INIT_VAR(&_3);
-	ZEPHIR_INIT_NVAR(&_3);
-	zephir_create_closure_ex(&_3, NULL, phalcon_16__closure_ce, SL("__invoke"));
-	ZEPHIR_CALL_FUNCTION(&output, "array_map", NULL, 107, &_3, &exploded);
-	zephir_check_call_status();
-	zephir_fast_join_str(return_value, SL(""), &output);
 	RETURN_MM();
+}
+
+/**
+ * @param string $text
+ * @param string $delimiters
+ * @param bool   $lowerFirst
+ *
+ * @return string
+ */
+PHP_METHOD(Phalcon_Support_Helper_Str_Camelize, toCamelize)
+{
+	zephir_method_globals *ZEPHIR_METHOD_GLOBALS_PTR = NULL;
+	zend_long ZEPHIR_LAST_CALL_STATUS;
+	zend_bool lowerFirst;
+	zval text_zv, delimiters_zv, *lowerFirst_param = NULL, result, _0$$3;
+	zend_string *text = NULL, *delimiters = NULL;
+
+	ZVAL_UNDEF(&text_zv);
+	ZVAL_UNDEF(&delimiters_zv);
+	ZVAL_UNDEF(&result);
+	ZVAL_UNDEF(&_0$$3);
+	ZEND_PARSE_PARAMETERS_START(1, 3)
+		Z_PARAM_STR(text)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_STR(delimiters)
+		Z_PARAM_BOOL(lowerFirst)
+	ZEND_PARSE_PARAMETERS_END();
+	ZEPHIR_METHOD_GLOBALS_PTR = pecalloc(1, sizeof(zephir_method_globals), 0);
+	zephir_memory_grow_stack(ZEPHIR_METHOD_GLOBALS_PTR, __func__);
+	if (ZEND_NUM_ARGS() > 2) {
+		lowerFirst_param = ZEND_CALL_ARG(execute_data, 3);
+	}
+	zephir_memory_observe(&text_zv);
+	ZVAL_STR_COPY(&text_zv, text);
+	if (!delimiters) {
+		delimiters = zend_string_init(ZEND_STRL("-_"), 0);
+		zephir_memory_observe(&delimiters_zv);
+		ZVAL_STR(&delimiters_zv, delimiters);
+	} else {
+		zephir_memory_observe(&delimiters_zv);
+	ZVAL_STR_COPY(&delimiters_zv, delimiters);
+	}
+	if (!lowerFirst_param) {
+		lowerFirst = 0;
+	} else {
+		}
+	ZEPHIR_INIT_VAR(&result);
+	zephir_camelize(&result, &text_zv, &delimiters_zv);
+	if (lowerFirst == 1) {
+		ZEPHIR_CALL_FUNCTION(&_0$$3, "lcfirst", NULL, 181, &result);
+		zephir_check_call_status();
+		ZEPHIR_CPY_WRT(&result, &_0$$3);
+	}
+	RETURN_CCTOR(&result);
 }
 

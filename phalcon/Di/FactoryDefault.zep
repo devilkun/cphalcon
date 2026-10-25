@@ -10,54 +10,100 @@
 
 namespace Phalcon\Di;
 
-use Phalcon\Assets\Manager as AssetManager;
+use Phalcon\Annotations\Adapter\Memory as AnnotationsMemory;
+use Phalcon\Assets\Manager as AssetsManager;
+use Phalcon\Encryption\Crypt;
+use Phalcon\Encryption\Security;
+use Phalcon\Events\Manager as EventsManager;
+use Phalcon\Filter\Filter;
+use Phalcon\Flash\Direct;
+use Phalcon\Flash\Session;
 use Phalcon\Html\Escaper;
 use Phalcon\Html\TagFactory;
-use Phalcon\Filter\FilterFactory;
+use Phalcon\Http\Request;
+use Phalcon\Http\Response;
+use Phalcon\Http\Response\Cookies;
+use Phalcon\Mvc\Dispatcher;
+use Phalcon\Mvc\Model\Manager as ModelManager;
+use Phalcon\Mvc\Model\MetaData\Memory as ModelMetaDataMemory;
+use Phalcon\Mvc\Model\Transaction\Manager as TransactionManager;
+use Phalcon\Mvc\Router;
+use Phalcon\Mvc\Url;
+use Phalcon\Queue\QueueFactory;
+use Phalcon\Support\HelperFactory;
+use Phalcon\Support\Settings;
 
 /**
- * This is a variant of the standard Phalcon\Di. By default it automatically
+ * This is a variant of the standard Phalcon\Di\Di. By default it automatically
  * registers all the services provided by the framework. Thanks to this, the
  * developer does not need to register each service individually providing a
  * full stack framework
  */
-class FactoryDefault extends \Phalcon\Di
+class FactoryDefault extends \Phalcon\Di\Di
 {
     /**
      * Phalcon\Di\FactoryDefault constructor
      */
     public function __construct()
     {
-        var assets, escaper, filter, tagFactory;
-
         parent::__construct();
 
-        let escaper    = new Escaper(),
-            filter     = new FilterFactory(),
-            tagFactory = new TagFactory(escaper),
-            assets     = new AssetManager(tagFactory);
-
         let this->services = [
-            "annotations":        new Service("Phalcon\\Annotations\\Adapter\\Memory", true),
-            "assets":             new Service(assets, true),
-            "crypt":              new Service("Phalcon\\Encryption\\Crypt", true),
-            "cookies":            new Service("Phalcon\\Http\\Response\\Cookies", true),
-            "dispatcher":         new Service("Phalcon\\Mvc\\Dispatcher", true),
-            "escaper":            new Service(escaper, true),
-            "eventsManager":      new Service("Phalcon\\Events\\Manager", true),
-            "flash":              new Service("Phalcon\\Flash\\Direct", true),
-            "flashSession":       new Service("Phalcon\\Flash\\Session", true),
-            "filter":             new Service(filter->newInstance(), true),
-            "helper":             new Service("Phalcon\\Support\\HelperFactory", true),
-            "modelsManager":      new Service("Phalcon\\Mvc\\Model\\Manager", true),
-            "modelsMetadata":     new Service("Phalcon\\Mvc\\Model\\MetaData\\Memory", true),
-            "request":            new Service("Phalcon\\Http\\Request", true),
-            "response":           new Service("Phalcon\\Http\\Response", true),
-            "router":             new Service("Phalcon\\Mvc\\Router", true),
-            "security":           new Service("Phalcon\\Encryption\\Security", true),
-            "tag":                new Service("Phalcon\\Tag", true),
-            "transactionManager": new Service("Phalcon\\Mvc\\Model\\Transaction\\Manager", true),
-            "url":                new Service("Phalcon\\Url", true)
+            "annotations"        : new Service(AnnotationsMemory::class, true),
+            "assets"             : new Service(
+                [
+                    "className" : AssetsManager::class,
+                    "arguments" : [
+                        [
+                            "type" : "service",
+                            "name" : "tag"
+                        ]
+                    ]
+                ],
+                true
+            ),
+            "crypt"              : new Service(Crypt::class, true),
+            "cookies"            : new Service(Cookies::class, true),
+            "dispatcher"         : new Service(Dispatcher::class, true),
+            "escaper"            : new Service(Escaper::class, true),
+            "eventsManager"      : new Service(EventsManager::class, true),
+            "flash"              : new Service(Direct::class, true),
+            "flashSession"       : new Service(Session::class, true),
+            "filter"             : new Service(
+                [
+                    "className" : Filter::class,
+                    "arguments" : [
+                        [
+                            "type"  : "parameter",
+                            "value" : Filter::getDefaultMapper()
+                        ]
+                    ]
+                ],
+                true
+            ),
+            "helper"             : new Service(HelperFactory::class, true),
+            "settings"           : new Service(Settings::class, true),
+            "modelsManager"      : new Service(ModelManager::class, true),
+            "modelsMetadata"     : new Service(ModelMetaDataMemory::class, true),
+            "queueFactory"       : new Service(QueueFactory::class, true),
+            "request"            : new Service(Request::class, true),
+            "response"           : new Service(Response::class, true),
+            "router"             : new Service(Router::class, true),
+            "security"           : new Service(Security::class, true),
+            "tag"                : new Service(
+                [
+                    "className" : TagFactory::class,
+                    "arguments" : [
+                        [
+                            "type" : "service",
+                            "name" : "escaper"
+                        ]
+                    ]
+                ],
+                true
+            ),
+            "transactionManager" : new Service(TransactionManager::class, true),
+            "url"                : new Service(Url::class, true)
         ];
     }
 }

@@ -10,22 +10,10 @@
 
 namespace Phalcon\Forms\Element;
 
-use Phalcon\Tag;
-
 /**
- * Phalcon\Forms\Element\Numeric
- *
  * Component INPUT[type=number] for forms
  */
 class Numeric extends AbstractElement
 {
-    /**
-     * Renders the element widget returning HTML
-     */
-    public function render(array attributes = []) -> string
-    {
-        return Tag::numericField(
-            this->prepareAttributes(attributes)
-        );
-    }
+    protected string method = "inputNumeric";
 }

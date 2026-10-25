@@ -21,7 +21,13 @@
  * file that was distributed with this source code.
  */
 /**
- * Parses docblocks returning an array with the found annotations
+ * Reads the annotations of a class and returns them as an array
+ *
+ * Phalcon\Annotations\Reader reads the docblocks and Phalcon\Annotations\AttributesReader
+ * reads the PHP attributes. The two give the same array shape, so the adapter
+ * and the classes after it do not know which reader made it.
+ *
+ * @phpstan-import-type annotations_reflection_data from AnnotationsTypes
  */
 ZEPHIR_INIT_CLASS(Phalcon_Annotations_ReaderInterface)
 {
@@ -31,10 +37,10 @@ ZEPHIR_INIT_CLASS(Phalcon_Annotations_ReaderInterface)
 }
 
 /**
- * Reads annotations from the class docblocks, its methods and/or properties
+ * Reads annotations from the class, its constants, properties and methods
+ *
+ * @phpstan-param class-string $className
+ *
+ * @phpstan-return annotations_reflection_data
  */
 ZEPHIR_DOC_METHOD(Phalcon_Annotations_ReaderInterface, parse);
-/**
- * Parses a raw docblock returning the annotations found
- */
-ZEPHIR_DOC_METHOD(Phalcon_Annotations_ReaderInterface, parseDocBlock);

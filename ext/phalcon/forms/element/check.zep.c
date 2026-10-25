@@ -12,10 +12,8 @@
 #include <Zend/zend_interfaces.h>
 
 #include "kernel/main.h"
-#include "kernel/fcall.h"
-#include "kernel/memory.h"
-#include "kernel/operators.h"
 #include "kernel/object.h"
+#include "kernel/memory.h"
 
 
 /**
@@ -27,56 +25,83 @@
  * file that was distributed with this source code.
  */
 /**
- * Phalcon\Forms\Element\Check
- *
  * Component INPUT[type=check] for forms
  */
 ZEPHIR_INIT_CLASS(Phalcon_Forms_Element_Check)
 {
 	ZEPHIR_REGISTER_CLASS_EX(Phalcon\\Forms\\Element, Check, phalcon, forms_element_check, phalcon_forms_element_abstractelement_ce, phalcon_forms_element_check_method_entry, 0);
 
+	{
+		zval _zc0;
+		ZVAL_STRINGL(&_zc0, "inputCheckbox", sizeof("inputCheckbox") - 1);
+		zephir_declare_typed_property(phalcon_forms_element_check_ce, SL("method"), &_zc0, ZEND_ACC_PROTECTED, MAY_BE_STRING, NULL, 0);
+	}
+
+	/**
+	 * @var mixed
+	 */
+	zend_declare_property_null(phalcon_forms_element_check_ce, SL("uncheckedValue"), ZEND_ACC_PROTECTED);
+	{
+		zval _zc0;
+		ZVAL_BOOL(&_zc0, 0);
+		zephir_declare_typed_property(phalcon_forms_element_check_ce, SL("uncheckedValueSet"), &_zc0, ZEND_ACC_PROTECTED, MAY_BE_BOOL, NULL, 0);
+	}
+
 	return SUCCESS;
 }
 
 /**
- * Renders the element widget returning HTML
+ * Returns the value to bind when the checkbox is absent from submitted
+ * data. Only meaningful when hasUncheckedValue() is true.
  */
-PHP_METHOD(Phalcon_Forms_Element_Check, render)
+PHP_METHOD(Phalcon_Forms_Element_Check, getUncheckedValue)
 {
-	zephir_method_globals *ZEPHIR_METHOD_GLOBALS_PTR = NULL;
-	zend_long ZEPHIR_LAST_CALL_STATUS;
-	zephir_fcall_cache_entry *_0 = NULL;
-	zval *attributes_param = NULL, _1, _2;
-	zval attributes;
+
+	RETURN_MEMBER(getThis(), "uncheckedValue");
+}
+
+/**
+ * Whether an "unchecked value" has been explicitly registered.
+ */
+PHP_METHOD(Phalcon_Forms_Element_Check, hasUncheckedValue)
+{
+
+	RETURN_MEMBER(getThis(), "uncheckedValueSet");
+}
+
+/**
+ * Registers a value to bind when the checkbox is absent from submitted
+ * data (the typical browser behavior for an unchecked input). Without
+ * this opt-in, an unchecked checkbox leaves the entity property
+ * untouched. See cphalcon issue #16982.
+ */
+PHP_METHOD(Phalcon_Forms_Element_Check, setUncheckedValue)
+{
+	zval *value, value_sub, __$true, __$false;
 	zval *this_ptr = getThis();
 
-	ZVAL_UNDEF(&attributes);
-	ZVAL_UNDEF(&_1);
-	ZVAL_UNDEF(&_2);
-#if PHP_VERSION_ID >= 80000
-	bool is_null_true = 1;
-	ZEND_PARSE_PARAMETERS_START(0, 1)
-		Z_PARAM_OPTIONAL
-		Z_PARAM_ARRAY(attributes)
-	ZEND_PARSE_PARAMETERS_END();
-#endif
-
-
-	ZEPHIR_MM_GROW();
-	zephir_fetch_params(1, 0, 1, &attributes_param);
-	if (!attributes_param) {
-		ZEPHIR_INIT_VAR(&attributes);
-		array_init(&attributes);
-	} else {
-		zephir_get_arrval(&attributes, attributes_param);
+	ZVAL_UNDEF(&value_sub);
+	ZVAL_BOOL(&__$true, 1);
+	ZVAL_BOOL(&__$false, 0);
+	static zend_string *_zephir_prop_0 = NULL;
+	static zend_string *_zephir_prop_1 = NULL;
+	if (UNEXPECTED(!_zephir_prop_0)) {
+		_zephir_prop_0 = zend_string_init("uncheckedValue", 14, 1);
+	}
+	if (UNEXPECTED(!_zephir_prop_1)) {
+		_zephir_prop_1 = zend_string_init("uncheckedValueSet", 17, 1);
 	}
 
-
-	ZVAL_BOOL(&_2, 1);
-	ZEPHIR_CALL_METHOD(&_1, this_ptr, "prepareattributes", NULL, 0, &attributes, &_2);
-	zephir_check_call_status();
-	ZEPHIR_RETURN_CALL_CE_STATIC(phalcon_tag_ce, "checkfield", &_0, 0, &_1);
-	zephir_check_call_status();
-	RETURN_MM();
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_ZVAL(value)
+	ZEND_PARSE_PARAMETERS_END();
+	zephir_fetch_params_without_memory_grow(1, 0, &value);
+	zephir_update_property_zval_cached(this_ptr, _zephir_prop_0, 788, value);
+	if (1) {
+		zephir_update_property_zval_cached(this_ptr, _zephir_prop_1, 789, &__$true);
+	} else {
+		zephir_update_property_zval_cached(this_ptr, _zephir_prop_1, 789, &__$false);
+	}
+	RETURN_THISW();
 }
 

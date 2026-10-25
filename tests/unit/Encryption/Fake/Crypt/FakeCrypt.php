@@ -1,0 +1,46 @@
+<?php
+
+/**
+ * This file is part of the Phalcon Framework.
+ *
+ * (c) Phalcon Team <team@phalcon.io>
+ *
+ * For the full copyright and license information, please view the LICENSE.txt
+ * file that was distributed with this source code.
+ */
+
+declare(strict_types=1);
+
+namespace Phalcon\Tests\Unit\Encryption\Fake\Crypt;
+
+use Phalcon\Encryption\Crypt;
+use Phalcon\Encryption\Crypt\Exception\Exception;
+
+class FakeCrypt extends Crypt
+{
+    /**
+     * Makes this method public
+     *
+     * @throws Exception
+     */
+    public function cryptPadText(
+        string $input,
+        string $mode,
+        int $blockSize,
+        int $paddingType
+    ): string {
+        return parent::cryptPadText($input, $mode, $blockSize, $paddingType);
+    }
+
+    /**
+     * @throws Exception
+     */
+    public function cryptUnpadText(
+        string $input,
+        string $mode,
+        int $blockSize,
+        int $paddingType
+    ): string {
+        return parent::cryptUnpadText($input, $mode, $blockSize, $paddingType);
+    }
+}

@@ -10,8 +10,11 @@
 
 namespace Phalcon\Config\Adapter;
 
-use InvalidArgumentException; // @todo this will also be removed when traits are available
 use Phalcon\Config\Config;
+use Phalcon\Config\Exceptions\CannotLoadConfigFile;
+use Phalcon\Contracts\Config\ConfigTypes;
+use Phalcon\Support\Helper\Json\Decode;
+use Phalcon\Traits\Php\FileTrait;
 
 /**
  * Reads JSON files and converts them to Phalcon\Config\Config objects.
@@ -32,42 +35,30 @@ use Phalcon\Config\Config;
  * echo $config->phalcon->baseuri;
  * echo $config->models->metadata;
  *```
+ *
+ * @phpstan-import-type config_data from ConfigTypes
  */
 class Json extends Config
 {
-    /**
-     * Phalcon\Config\Adapter\Json constructor
-     */
-    public function __construct(string! filePath)
-    {
-        parent::__construct(
-            this->decode(
-                file_get_contents(filePath),
-                true
-            )
-        );
-    }
+    use FileTrait;
 
     /**
-     * @todo This will be removed when traits are introduced
+     * Json constructor.
+     *
+     * @throws CannotLoadConfigFile
      */
-    private function decode(
-        string! data,
-        bool associative = false,
-        int depth = 512,
-        int options = 0
-    ) -> var
+    public function __construct(string filePath)
     {
-        var decoded;
+        var content;
 
-        let decoded = json_decode(data, associative, depth, options);
+        let content = this->phpFileGetContents(filePath);
 
-        if unlikely JSON_ERROR_NONE !== json_last_error() {
-            throw new InvalidArgumentException(
-                "json_decode error: " . json_last_error_msg()
-            );
+        if unlikely content === false {
+            throw new CannotLoadConfigFile(basename(filePath));
         }
 
-        return decoded;
+        parent::__construct(
+            (new Decode())->__invoke(content, true)
+        );
     }
 }

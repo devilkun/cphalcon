@@ -10,9 +10,11 @@
 
 namespace Phalcon\Mvc\Router;
 
+use Phalcon\Annotations\Annotation;
 use Phalcon\Di\DiInterface;
 use Phalcon\Mvc\Router;
-use Phalcon\Annotations\Annotation;
+use Phalcon\Mvc\Router\Exceptions\AnnotationsServiceUnavailable;
+use Phalcon\Mvc\Router\Exceptions\InvalidCallbackParameter;
 
 /**
  * Phalcon\Mvc\Router\Annotations
@@ -28,8 +30,8 @@ use Phalcon\Annotations\Annotation;
  *         // Use the annotations router
  *         $router = new Annotations(false);
  *
- *         // This will do the same as above but only if the handled uri starts with /robots
- *         $router->addResource("Robots", "/robots");
+ *         // This will do the same as above but only if the handled uri starts with /invoices
+ *         $router->addResource("Invoices", "/invoices");
  *
  *         return $router;
  *     }
@@ -45,6 +47,8 @@ class Annotations extends Router
 
     /**
      * @var callable|string|null
+     *
+     * @phpstan-var callable|string|null
      */
     protected actionPreformatCallback = null;
 
@@ -55,6 +59,8 @@ class Annotations extends Router
 
     /**
      * @var array
+     *
+     * @phpstan-var list<array{0: string|null, 1: string, 2?: string}>
      */
     protected handlers = [];
 
@@ -67,8 +73,10 @@ class Annotations extends Router
      * Adds a resource to the annotations handler
      * A resource is a class that contains routing annotations
      * The class is located in a module
+     *
+     * @phpstan-return static
      */
-    public function addModuleResource(string! module, string! handler, string! prefix = null) -> <Annotations>
+    public function addModuleResource(string module,  string handler,  string prefix = null) -> <static>
     {
         let this->handlers[] = [prefix, handler, module];
 
@@ -78,8 +86,10 @@ class Annotations extends Router
     /**
      * Adds a resource to the annotations handler
      * A resource is a class that contains routing annotations
+     *
+     * @phpstan-return static
      */
-    public function addResource(string! handler, string! prefix = null) -> <Annotations>
+    public function addResource(string handler,  string prefix = null) -> <static>
     {
         let this->handlers[] = [prefix, handler];
 
@@ -88,6 +98,8 @@ class Annotations extends Router
 
     /**
      * Return the registered resources
+     *
+     * @phpstan-return list<array{0: string|null, 1: string, 2?: string}>
      */
     public function getResources() -> array
     {
@@ -97,7 +109,7 @@ class Annotations extends Router
     /**
      * Produce the routing parameters from the rewrite information
      */
-    public function handle(string! uri) -> void
+    public function handle(string uri) -> void
     {
         var annotationsService, handlers, controllerSuffix, scope, prefix,
             route, compiledPattern, container, handler, controllerName,
@@ -109,9 +121,7 @@ class Annotations extends Router
         let container = <DiInterface> this->container;
 
         if unlikely typeof container != "object" {
-            throw new Exception(
-                Exception::containerServiceNotFound("the 'annotations' service")
-            );
+            throw new AnnotationsServiceUnavailable();
         }
 
         let handlers = this->handlers;
@@ -168,6 +178,18 @@ class Annotations extends Router
                  */
                 let controllerName = get_class_ns(handler),
                     namespaceName = get_ns_class(handler);
+
+                /**
+                 * Strip the suffix if the FQCN already includes it,
+                 * so we do not end up with e.g. "InvoicesControllerController"
+                 */
+                if ends_with(controllerName, controllerSuffix) {
+                    let controllerName = substr(
+                        controllerName,
+                        0,
+                        strlen(controllerName) - strlen(controllerSuffix)
+                    );
+                }
             } else {
                 let controllerName = handler;
 
@@ -180,6 +202,7 @@ class Annotations extends Router
              * Check if the scope has a module associated
              */
             fetch moduleName, scope[2];
+            let moduleName = moduleName !== null ? moduleName : "";
 
             let sufixed = controllerName . controllerSuffix;
 
@@ -253,10 +276,10 @@ class Annotations extends Router
      * Checks for annotations in the public methods of the controller
      */
     public function processActionAnnotation(
-        string! module,
-        string! namespaceName,
-        string! controller,
-        string! action,
+         string module,
+         string namespaceName,
+         string controller,
+         string action,
         <Annotation> annotation
     ) -> void {
         var name, proxyActionName, actionName, routePrefix, paths, value, uri, route, methods,
@@ -275,12 +298,16 @@ class Annotations extends Router
                 let isRoute = true;
                 break;
 
-            case "Get":
-            case "Post":
-            case "Put":
-            case "Patch":
+            case "Connect":
             case "Delete":
+            case "Get":
+            case "Head":
             case "Options":
+            case "Patch":
+            case "Post":
+            case "Purge":
+            case "Put":
+            case "Trace":
                 let isRoute = true,
                     methods = strtoupper(name);
                 break;
@@ -325,7 +352,7 @@ class Annotations extends Router
         let paths["controller"] = controller,
             paths["action"] = actionName;
 
-        let value = annotation->getArgument(0);
+        let value = this->resolveArgument(annotation, "route");
 
         /**
          * Create the route using the prefix
@@ -401,22 +428,26 @@ class Annotations extends Router
     /**
      * Checks for annotations in the controller docblock
      */
-    public function processControllerAnnotation(string! handler, <Annotation> annotation)
+    public function processControllerAnnotation(string handler, <Annotation> annotation)
     {
         /**
          * @RoutePrefix add a prefix for all the routes defined in the model
          */
         if annotation->getName() == "RoutePrefix" {
-            let this->routePrefix = annotation->getArgument(0);
+            let this->routePrefix = this->resolveArgument(annotation, "prefix");
         }
     }
 
     /**
      * Changes the action method suffix
+     *
+     * @phpstan-return static
      */
-    public function setActionSuffix(string! actionSuffix)
+    public function setActionSuffix(string actionSuffix) -> <self>
     {
         let this->actionSuffix = actionSuffix;
+
+        return this;
     }
 
     /**
@@ -447,8 +478,10 @@ class Annotations extends Router
      * ```
      *
      * @param callable|string|null $callback
+     *
+     * @phpstan-return static
      */
-    public function setActionPreformatCallback(var callback = null)
+    public function setActionPreformatCallback(var callback = null) -> <self>
     {
         if likely is_callable(callback) {
             let this->actionPreformatCallback = callback;
@@ -457,10 +490,10 @@ class Annotations extends Router
                 return uncamelize(action, "-");
             };
         } else {
-            throw new Exception(
-                "The 'callback' parameter must be either a callable or NULL."
-            );
+            throw new InvalidCallbackParameter();
         }
+
+        return this;
     }
 
     /**
@@ -473,9 +506,34 @@ class Annotations extends Router
 
     /**
      * Changes the controller class suffix
+     *
+     * @phpstan-return static
      */
-    public function setControllerSuffix(string! controllerSuffix)
+    public function setControllerSuffix(string controllerSuffix) -> <self>
     {
         let this->controllerSuffix = controllerSuffix;
+
+        return this;
+    }
+
+    /**
+     * Returns the argument at position 0, or the named one when position 0
+     * is not there.
+     *
+     * A docblock puts the value at position 0. An attribute puts it at
+     * position 0 too, unless the developer writes the name as a named
+     * argument.
+     */
+    protected function resolveArgument(<Annotation> annotation, string name) -> var
+    {
+        var value;
+
+        let value = annotation->getArgument(0);
+
+        if value === null {
+            let value = annotation->getArgument(name);
+        }
+
+        return value;
     }
 }

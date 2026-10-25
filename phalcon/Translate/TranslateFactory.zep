@@ -11,32 +11,29 @@
 namespace Phalcon\Translate;
 
 use Phalcon\Config\ConfigInterface;
+use Phalcon\Contracts\Translate\TranslateTypes;
 use Phalcon\Factory\AbstractFactory;
 use Phalcon\Translate\Adapter\AdapterInterface;
+use Phalcon\Translate\Adapter\Csv;
+use Phalcon\Translate\Adapter\Gettext;
+use Phalcon\Translate\Adapter\NativeArray;
+use Phalcon\Translate\Exceptions\TranslatorNotRegistered;
 
 /**
- * Class TranslateFactory
- *
- * @package Phalcon\Translate
- *
  * @property InterpolatorFactory $interpolator
+ *
+ * @phpstan-import-type translate_factory_config from TranslateTypes
  */
 class TranslateFactory extends AbstractFactory
 {
-    /**
-     * @var InterpolatorFactory
-     */
-    private interpolator;
+    private <InterpolatorFactory> interpolator;
 
     /**
-     * AdapterFactory constructor.
-     *
-     * @param InterpolatorFactory $interpolator
-     * @param array               $services
+     * @phpstan-param array<string, string> $services
      */
     public function __construct(
         <InterpolatorFactory> interpolator,
-        array! services = []
+         array services = []
     ) {
         let this->interpolator = interpolator;
 
@@ -46,19 +43,7 @@ class TranslateFactory extends AbstractFactory
     /**
      * Factory to create an instance from a Config object
      *
-     * @param array|ConfigInterface $config = [
-     *     'adapter' => 'ini,
-     *     'options' => [
-     *         'content'       => '',
-     *         'delimiter'     => ';',
-     *         'enclosure'     => '"',
-     *         'locale'        => '',
-     *         'defaultDomain' => '',
-     *         'directory'     => '',
-     *         'category'      => ''
-     *         'triggerError'  => false
-     *     ]
-     * ]
+     * @phpstan-param ConfigInterface|translate_factory_config $config
      *
      * @return AdapterInterface
      * @throws Exception
@@ -81,13 +66,11 @@ class TranslateFactory extends AbstractFactory
     /**
      * Create a new instance of the adapter
      *
-     * @param string $name
-     * @param array  $options
+     * @phpstan-param array<string, mixed> $options
      *
      * @return AdapterInterface
-     * @throws Exception
      */
-    public function newInstance(string! name, array! options = []) -> <AdapterInterface>
+    public function newInstance(string name,  array options = []) -> <AdapterInterface>
     {
         var definition;
 
@@ -103,24 +86,24 @@ class TranslateFactory extends AbstractFactory
     }
 
     /**
-     * @return string
+     * @return class-string<\Exception>
      */
     protected function getExceptionClass() -> string
     {
-        return "Phalcon\\Translate\\Exception";
+        return TranslatorNotRegistered::class;
     }
 
     /**
      * Returns the available adapters
      *
-     * @return string[]
+     * @return array<string, string>
      */
     protected function getServices() -> array
     {
         return [
-            "csv"     : "Phalcon\\Translate\\Adapter\\Csv",
-            "gettext" : "Phalcon\\Translate\\Adapter\\Gettext",
-            "array"   : "Phalcon\\Translate\\Adapter\\NativeArray"
+            "csv"     : Csv::class,
+            "gettext" : Gettext::class,
+            "array"   : NativeArray::class
         ];
     }
 }

@@ -11,9 +11,33 @@
 namespace Phalcon\Mvc\View\Engine\Volt;
 
 use Closure;
+use Phalcon\Contracts\Mvc\MvcTypes;
 use Phalcon\Di\DiInterface;
-use Phalcon\Mvc\ViewBaseInterface;
 use Phalcon\Di\InjectionAwareInterface;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\CannotOpenCompiledFile;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\CorruptedStatement;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\CorruptedStatementWithData;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\InvalidCompilationPrefix;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\InvalidExtension;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\InvalidIntermediateRepresentation;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\InvalidOptionType;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\InvalidPathClosureReturn;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\InvalidPathType;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\InvalidStatement;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\InvalidUserFilterDefinition;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\InvalidUserFunctionDefinition;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\MacroAlreadyDefined;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\TemplateFileNotFound;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\TemplateFileNotOpenable;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\TemplatePathCollision;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\UnknownVoltExpression;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\UnknownVoltFilter;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\UnknownVoltFilterType;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\UnknownVoltStatement;
+use Phalcon\Mvc\View\Engine\Volt\Exceptions\VoltDirectoryNotWritable;
+use Phalcon\Mvc\ViewBaseInterface;
+use Phalcon\Tag;
+use Phalcon\Traits\Php\FileTrait;
 
 /**
  * This class reads and compiles Volt templates into PHP plain code
@@ -25,30 +49,27 @@ use Phalcon\Di\InjectionAwareInterface;
  *
  * require $compiler->getCompiledTemplatePath();
  *```
+ *
+ * @phpstan-import-type mvc_volt_node from MvcTypes
  */
 class Compiler implements InjectionAwareInterface
 {
-    /**
-     * @var bool
-     */
-    protected autoescape = false;
+    use FileTrait;
 
-    /**
-     * @var int
-     */
-    protected blockLevel = 0;
+    protected bool autoescape = false;
+
+    protected int blockLevel = 0;
 
     /**
      * @var array|null
      *
      * TODO: Make array only?
+     *
+     * @phpstan-var array<array-key, mixed>|null
      */
     protected blocks;
 
-    /**
-     * @var DiInterface|null
-     */
-    protected container = null;
+    protected ?<DiInterface> container = null;
 
     /**
      * @var string|null
@@ -65,70 +86,62 @@ class Compiler implements InjectionAwareInterface
      */
     protected currentPath = null;
 
-    /**
-     * @var int
-     */
-    protected exprLevel = 0;
+    protected int exprLevel = 0;
 
-    /**
-     * @var bool
-     */
-    protected extended = false;
-
-    /**
-     * @var array
-     */
-    protected extensions = [];
+    protected bool extended = false;
 
     /**
      * @var array|bool
      *
      * TODO: Make it always array
+     *
+     * @phpstan-var array<array-key, mixed>|bool|string
      */
     protected extendedBlocks;
 
     /**
-     * @var array
+     * @phpstan-var list<object>
      */
-    protected filters = [];
+    protected array extensions = [];
 
     /**
-     * @var int
+     * @phpstan-var array<string, mixed>
      */
-    protected foreachLevel = 0;
+    protected array filters = [];
+
+    protected int foreachLevel = 0;
 
     /**
-     * @var array
+     * @phpstan-var array<int, string>
      */
-    protected forElsePointers = [];
+    protected array forElsePointers = [];
 
     /**
-     * @var array
+     * @phpstan-var array<string, mixed>
      */
-    protected functions = [];
+    protected array functions = [];
+
+    protected int level = 0;
 
     /**
-     * @var int
+     * @phpstan-var array<int, int>
      */
-    protected level = 0;
+    protected array loopPointers = [];
 
     /**
-     * @var array
+     * @phpstan-var array<string, string>
      */
-    protected loopPointers = [];
+    protected array macros = [];
 
     /**
-     * @var array
+     * @phpstan-var array<string, mixed>
      */
-    protected macros = [];
-
-    /**
-     * @var array
-     */
-    protected options = [];
+    protected array options = [];
 
     /**
      * @var string
+     *
+     * @phpstan-var Closure|string
      */
     protected prefix = "";
 
@@ -136,6 +149,13 @@ class Compiler implements InjectionAwareInterface
      * @var ViewBaseInterface|null
      */
     protected view;
+
+    /**
+     * The virtual path of each template path (see compile())
+     *
+     * @phpstan-var array<string, string>
+     */
+    protected array virtualPaths = [];
 
     /**
      * Phalcon\Mvc\View\Engine\Volt\Compiler
@@ -152,12 +172,12 @@ class Compiler implements InjectionAwareInterface
      *
      * @var mixed extension
      *
-     * @return Compiler
+     * @return static
      */
-    public function addExtension(extension) -> <Compiler>
+    public function addExtension(extension) -> <static>
     {
         if unlikely typeof extension != "object" {
-            throw new Exception("The extension is not valid");
+            throw new InvalidExtension();
         }
 
         /**
@@ -178,9 +198,9 @@ class Compiler implements InjectionAwareInterface
      * @param string name
      * @param mixed definition
      *
-     * @return Compiler
+     * @return static
      */
-    public function addFilter(string! name, var definition) -> <Compiler>
+    public function addFilter(string name, var definition) -> <static>
     {
         let this->filters[name] = definition;
 
@@ -193,9 +213,9 @@ class Compiler implements InjectionAwareInterface
      * @param string name
      * @param mixed definition
      *
-     * @return Compiler
+     * @return static
      */
-    public function addFunction(string! name, var definition) -> <Compiler>
+    public function addFunction(string name, var definition) -> <static>
     {
         let this->functions[name] = definition;
 
@@ -208,8 +228,10 @@ class Compiler implements InjectionAwareInterface
      * @param array expr
      *
      * @return string
+     *
+     * @phpstan-param mvc_volt_node $expr
      */
-    public function attributeReader(array! expr) -> string
+    public function attributeReader(array expr) -> string
     {
         var left, leftType, variable, level, leftCode, right;
         string exprCode;
@@ -233,14 +255,15 @@ class Compiler implements InjectionAwareInterface
                  * Services registered in the dependency injector container are
                  * available always
                  */
-                if typeof this->container == "object" && this->container->has(variable) {
+                if this->container !== null && this->container->has(variable) {
                     let exprCode .= "$this->" . variable;
                 } else {
                     let exprCode .= "$" . variable;
                 }
             }
         } else {
-            let leftCode = this->expression(left), leftType = left["type"];
+            let leftCode = this->expression(left),
+                leftType = left["type"];
 
             if leftType != PHVOLT_T_DOT && leftType != PHVOLT_T_FCALL {
                 let exprCode .= leftCode;
@@ -278,23 +301,11 @@ class Compiler implements InjectionAwareInterface
      * @throws \Phalcon\Mvc\View\Engine\Volt\Exception
      * @return mixed
      */
-    public function compile(string! templatePath, bool extendsMode = false)
+    public function compile(string templatePath, bool extendsMode = false)
     {
         var blocksCode, compilation, compileAlways, compiledExtension,
-            compiledPath, compiledSeparator, compiledTemplatePath, options,
-            prefix, stat, templateSepPath;
-
-        /**
-         * Re-initialize some properties already initialized when the object is
-         * cloned
-         */
-        let this->extended = false;
-        let this->extendedBlocks = false;
-        let this->blocks = null;
-        let this->level = 0;
-        let this->foreachLevel = 0;
-        let this->blockLevel = 0;
-        let this->exprLevel = 0;
+            compiledPath, compiledSeparator, options, prefix, realTemplatePath,
+            stat, templateSepPath, compiledTemplatePath = "";
 
         let compilation = null;
 
@@ -315,7 +326,7 @@ class Compiler implements InjectionAwareInterface
         }
 
         if unlikely typeof compileAlways != "boolean" {
-            throw new Exception("'always' must be a bool value");
+            throw new InvalidOptionType("always", "bool value");
         }
 
         /**
@@ -326,7 +337,7 @@ class Compiler implements InjectionAwareInterface
         }
 
         if unlikely typeof prefix != "string" {
-            throw new Exception("'prefix' must be a string");
+            throw new InvalidOptionType("prefix", "string");
         }
 
         /**
@@ -359,7 +370,7 @@ class Compiler implements InjectionAwareInterface
         }
 
         if unlikely typeof compiledSeparator != "string" {
-            throw new Exception("'separator' must be a string");
+            throw new InvalidOptionType("separator", "string");
         }
 
         /**
@@ -377,7 +388,7 @@ class Compiler implements InjectionAwareInterface
         }
 
         if unlikely typeof compiledExtension != "string" {
-            throw new Exception("'extension' must be a string");
+            throw new InvalidOptionType("extension", "string");
         }
 
         /**
@@ -397,12 +408,20 @@ class Compiler implements InjectionAwareInterface
             if !empty compiledPath {
                 /**
                  * Create the virtual path replacing the directory separator by
-                 * the compiled separator
+                 * the compiled separator. Keep it for the next calls when the
+                 * template file exists.
                  */
-                let templateSepPath = prepare_virtual_path(
-                    realpath(templatePath),
-                    compiledSeparator
-                );
+                if !fetch templateSepPath, this->virtualPaths[templatePath] {
+                    let realTemplatePath = realpath(templatePath);
+                    let templateSepPath = prepare_virtual_path(
+                        realTemplatePath,
+                        compiledSeparator
+                    );
+
+                    if typeof realTemplatePath == "string" {
+                        let this->virtualPaths[templatePath] = templateSepPath;
+                    }
+                }
             } else {
                 let templateSepPath = templatePath;
             }
@@ -428,22 +447,18 @@ class Compiler implements InjectionAwareInterface
              * The closure must return a valid path
              */
             if unlikely typeof compiledTemplatePath != "string" {
-                throw new Exception(
-                    "'path' closure didn't return a valid string"
-                );
+                throw new InvalidPathClosureReturn();
             }
         } else {
-            throw new Exception(
-                "'path' must be a string or a closure"
-            );
+            throw new InvalidPathType();
         }
 
         /**
          * Compile always must be used only in the development stage
          */
-        if !file_exists(compiledTemplatePath) || compileAlways {
+        if !this->phpFileExists(compiledTemplatePath) || compileAlways {
             /**
-             * The file needs to be compiled because it either doesn't exist or
+             * The file needs to be compiled because it either does not exist or
              * needs to compiled every time
              */
             let compilation = this->compileFile(
@@ -469,19 +484,29 @@ class Compiler implements InjectionAwareInterface
                          * In extends mode we read the file that must
                          * contains a serialized array of blocks
                          */
-                        let blocksCode = file_get_contents(compiledTemplatePath);
+                        let blocksCode = this->phpFileGetContents(compiledTemplatePath);
 
                         if unlikely blocksCode === false {
-                            throw new Exception(
-                                "Extends compilation file " . compiledTemplatePath . " could not be opened"
-                            );
+                            throw new CannotOpenCompiledFile(compiledTemplatePath);
                         }
 
                         /**
                          * Unserialize the array blocks code
                          */
                         if blocksCode {
-                            let compilation = unserialize(blocksCode);
+                            let compilation = unserialize(blocksCode, ["allowed_classes": false]);
+
+                            /**
+                             * The cache holds nested arrays only. Anything
+                             * else is a damaged or planted file: recompile.
+                             */
+                            if typeof compilation !== "array" {
+                                let compilation = this->compileFile(
+                                    templatePath,
+                                    compiledTemplatePath,
+                                    extendsMode
+                                );
+                            }
                         } else {
                             let compilation = [];
                         }
@@ -502,8 +527,10 @@ class Compiler implements InjectionAwareInterface
      * @param bool extendsMode
      *
      * @return string
+     *
+     * @phpstan-param mvc_volt_node $statement
      */
-    public function compileAutoEscape(array! statement, bool extendsMode) -> string
+    public function compileAutoEscape(array statement, bool extendsMode) -> string
     {
         var autoescape, oldAutoescape, compilation;
 
@@ -511,7 +538,7 @@ class Compiler implements InjectionAwareInterface
          * A valid option is required
          */
         if unlikely !fetch autoescape, statement["enable"] {
-            throw new Exception("Corrupted statement");
+            throw new CorruptedStatement();
         }
 
         /**
@@ -535,10 +562,13 @@ class Compiler implements InjectionAwareInterface
      *
      * @param array statement
      * @param bool extendsMode
+     *
+     * @phpstan-param mvc_volt_node $statement
      */
-    public function compileCall(array! statement, bool extendsMode)
+    public function compileCall(array statement, bool extendsMode) -> string
     {
         // Not implemented?
+        return "";
     }
 
     /**
@@ -548,8 +578,10 @@ class Compiler implements InjectionAwareInterface
      * @param bool caseClause
      *
      * @return string
+     *
+     * @phpstan-param mvc_volt_node $statement
      */
-    public function compileCase(array! statement, bool caseClause = true) -> string
+    public function compileCase(array statement, bool caseClause = true) -> string
     {
         var expr;
 
@@ -564,7 +596,7 @@ class Compiler implements InjectionAwareInterface
          * A valid expression is required
          */
         if unlikely !fetch expr, statement["expr"] {
-            throw new Exception("Corrupt statement", statement);
+            throw new CorruptedStatementWithData(statement);
         }
 
         /**
@@ -576,11 +608,11 @@ class Compiler implements InjectionAwareInterface
     /**
      * Compiles a "do" statement returning PHP code
      *
-     * @param array statement
+     * @phpstan-param mvc_volt_node $statement
      *
-     * @return string
+     * @throws Exception
      */
-    public function compileDo(array! statement) -> string
+    public function compileDo(array statement) -> string
     {
         var expr;
 
@@ -588,7 +620,7 @@ class Compiler implements InjectionAwareInterface
          * A valid expression is required
          */
         if unlikely !fetch expr, statement["expr"] {
-            throw new Exception("Corrupted statement");
+            throw new CorruptedStatement();
         }
 
         /**
@@ -598,13 +630,13 @@ class Compiler implements InjectionAwareInterface
     }
 
     /**
-     * Compiles a {% raw %}`{{` `}}`{% endraw %} statement returning PHP code
+     * Compiles a `{{` `}}` statement returning PHP code
      *
-     * @param array statement
+     * @phpstan-param mvc_volt_node $statement
      *
-     * @return string
+     * @throws Exception
      */
-    public function compileEcho(array! statement) -> string
+    public function compileEcho(array statement) -> string
     {
         var expr, exprCode, name;
 
@@ -612,7 +644,7 @@ class Compiler implements InjectionAwareInterface
          * A valid expression is required
          */
         if unlikely !fetch expr, statement["expr"] {
-            throw new Exception("Corrupt statement", statement);
+            throw new CorruptedStatementWithData(statement);
         }
 
         /**
@@ -621,8 +653,11 @@ class Compiler implements InjectionAwareInterface
         let exprCode = this->expression(expr);
 
         if expr["type"] == PHVOLT_T_FCALL  {
-            let name = expr["name"];
+            if this->isTagFactory(expr) === true {
+                let exprCode = this->expression(expr, true);
+            }
 
+            let name = expr["name"];
             if name["type"] == PHVOLT_T_IDENTIFIER {
                 /**
                  * super() is a function however the return of this function
@@ -638,7 +673,7 @@ class Compiler implements InjectionAwareInterface
          * Echo statement
          */
         if this->autoescape {
-            return "<?= $this->escaper->escapeHtml(" . exprCode . ") ?>";
+            return "<?= $this->escaper->html(" . exprCode . ") ?>";
         }
 
         return "<?= " . exprCode . " ?>";
@@ -647,11 +682,11 @@ class Compiler implements InjectionAwareInterface
     /**
      * Compiles a "elseif" statement returning PHP code
      *
-     * @param array statement
+     * @phpstan-param mvc_volt_node $statement
      *
-     * @return string
+     * @throws Exception
      */
-    public function compileElseIf(array! statement) -> string
+    public function compileElseIf(array statement) -> string
     {
         var expr;
 
@@ -659,7 +694,7 @@ class Compiler implements InjectionAwareInterface
          * A valid expression is required
          */
         if unlikely !fetch expr, statement["expr"] {
-            throw new Exception("Corrupt statement", statement);
+            throw new CorruptedStatementWithData(statement);
         }
 
         /**
@@ -684,34 +719,32 @@ class Compiler implements InjectionAwareInterface
      *
      * @throws \Phalcon\Mvc\View\Engine\Volt\Exception
      * @return string|array
+     *
+     * @phpstan-return array<array-key, mixed>|string
      */
-    public function compileFile(string! path, string! compiledPath, bool extendsMode = false)
+    public function compileFile(string path,  string compiledPath, bool extendsMode = false)
     {
         var viewCode, compilation, finalCompilation;
 
         if unlikely path == compiledPath {
-            throw new Exception(
-                "Template path and compilation template path cannot be the same"
-            );
+            throw new TemplatePathCollision();
         }
 
         /**
          * Check if the template does exist
          */
-        if unlikely !file_exists(path) {
-            throw new Exception("Template file " . path . " does not exist");
+        if unlikely !this->phpFileExists(path) {
+            throw new TemplateFileNotFound(path);
         }
 
         /**
          * Always use file_get_contents instead of read the file directly, this
          * respect the open_basedir directive
          */
-        let viewCode = file_get_contents(path);
+        let viewCode = this->phpFileGetContents(path);
 
         if unlikely viewCode === false {
-            throw new Exception(
-                "Template file " . path . " could not be opened"
-            );
+            throw new TemplateFileNotOpenable(path);
         }
 
         let this->currentPath = path;
@@ -731,8 +764,8 @@ class Compiler implements InjectionAwareInterface
          * Always use file_put_contents to write files instead of write the file
          * directly, this respect the open_basedir directive
          */
-        if unlikely file_put_contents(compiledPath, finalCompilation) === false {
-            throw new Exception("Volt directory can't be written");
+        if unlikely this->phpFilePutContents(compiledPath, finalCompilation) === false {
+            throw new VoltDirectoryNotWritable();
         }
 
         return compilation;
@@ -745,8 +778,10 @@ class Compiler implements InjectionAwareInterface
      * @param bool extendsMode
      *
      * @return string
+     *
+     * @phpstan-param mvc_volt_node $statement
      */
-    public function compileForeach(array! statement, bool extendsMode = false) -> string
+    public function compileForeach(array statement, bool extendsMode = false) -> string
     {
         var prefix, level, prefixLevel, expr, exprCode, bstatement, type,
             blockStatements, forElse, code, loopContext, iterator, key, ifExpr,
@@ -757,16 +792,14 @@ class Compiler implements InjectionAwareInterface
          * A valid expression is required
          */
         if unlikely !isset statement["expr"] {
-            throw new Exception("Corrupted statement");
+            throw new CorruptedStatement();
         }
 
         let compilation = "",
             forElse = null;
 
         let this->foreachLevel++;
-
         let prefix = this->getUniquePrefix();
-
         let level = this->foreachLevel;
 
         /**
@@ -778,14 +811,12 @@ class Compiler implements InjectionAwareInterface
          * Evaluate common expressions
          */
         let expr = statement["expr"];
-
         let exprCode = this->expression(expr);
 
         /**
          * Process the block statements
          */
         let blockStatements = statement["block_statements"];
-
         let forElse = false;
 
         if typeof blockStatements == "array" {
@@ -811,7 +842,6 @@ class Compiler implements InjectionAwareInterface
          * Process statements block
          */
         let code = this->statementList(blockStatements, extendsMode);
-
         let loopContext = this->loopPointers;
 
         /**
@@ -929,8 +959,10 @@ class Compiler implements InjectionAwareInterface
      *
      * @throws \Phalcon\Mvc\View\Engine\Volt\Exception
      * @return string
+     *
+     * @phpstan-param mvc_volt_node $statement
      */
-    public function compileIf(array! statement, bool extendsMode = false) -> string
+    public function compileIf(array statement, bool extendsMode = false) -> string
     {
         var blockStatements, expr;
         string compilation;
@@ -939,7 +971,7 @@ class Compiler implements InjectionAwareInterface
          * A valid expression is required
          */
         if unlikely !fetch expr, statement["expr"] {
-            throw new Exception("Corrupt statement", statement);
+            throw new CorruptedStatementWithData(statement);
         }
 
         /**
@@ -969,8 +1001,10 @@ class Compiler implements InjectionAwareInterface
      *
      * @throws \Phalcon\Mvc\View\Engine\Volt\Exception
      * @return string
+     *
+     * @phpstan-param mvc_volt_node $statement
      */
-    public function compileInclude(array! statement) -> string
+    public function compileInclude(array statement) -> string
     {
         var pathExpr, path, subCompiler, finalPath, compilation, params;
 
@@ -979,7 +1013,7 @@ class Compiler implements InjectionAwareInterface
          * A valid expression is required
          */
         if unlikely !fetch pathExpr, statement["path"] {
-            throw new Exception("Corrupted statement");
+            throw new CorruptedStatement();
         }
 
         /**
@@ -1002,7 +1036,7 @@ class Compiler implements InjectionAwareInterface
                 /**
                  * Clone the original compiler
                  * Perform a sub-compilation of the included file
-                 * If the compilation doesn't return anything we include the compiled path
+                 * If the compilation does not return anything we include the compiled path
                  */
                 let subCompiler = clone this;
                 let compilation = subCompiler->compile(finalPath, false);
@@ -1012,7 +1046,7 @@ class Compiler implements InjectionAwareInterface
                      * Use file-get-contents to respect the openbase_dir
                      * directive
                      */
-                    let compilation = file_get_contents(
+                    let compilation = this->phpFileGetContents(
                         subCompiler->getCompiledTemplatePath()
                     );
                 }
@@ -1039,12 +1073,11 @@ class Compiler implements InjectionAwareInterface
     /**
      * Compiles macros
      *
-     * @param array statement
-     * @param bool extendsMode
+     * @phpstan-param mvc_volt_node $statement
      *
-     * @return string
+     * @throws Exception
      */
-    public function compileMacro(array! statement, bool extendsMode) -> string
+    public function compileMacro(array statement, bool extendsMode) -> string
     {
         var name, defaultValue, parameters, position, parameter, variableName,
             blockStatements;
@@ -1054,23 +1087,21 @@ class Compiler implements InjectionAwareInterface
          * A valid name is required
          */
         if unlikely !fetch name, statement["name"] {
-            throw new Exception("Corrupted statement");
+            throw new CorruptedStatement();
         }
 
         /**
          * Check if the macro is already defined
          */
         if unlikely isset this->macros[name] {
-            throw new Exception("Macro '" . name . "' is already defined");
+            throw new MacroAlreadyDefined(name);
         }
 
         /**
          * Register the macro
          */
         let this->macros[name] = name;
-
         let macroName = "$this->macros['" . name . "']";
-
         let code = "<?php ";
 
         if !fetch parameters, statement["parameters"] {
@@ -1126,10 +1157,11 @@ class Compiler implements InjectionAwareInterface
     /**
      * Compiles a "return" statement returning PHP code
      *
-     * @throws \Phalcon\Mvc\View\Engine\Volt\Exception
-     * @return string
+     * @phpstan-param mvc_volt_node $statement
+     *
+     * @throws Exception
      */
-    public function compileReturn(array! statement) -> string
+    public function compileReturn(array statement) -> string
     {
         var expr;
 
@@ -1137,7 +1169,7 @@ class Compiler implements InjectionAwareInterface
          * A valid expression is required
          */
         if unlikely !fetch expr, statement["expr"] {
-            throw new Exception("Corrupted statement");
+            throw new CorruptedStatement();
         }
 
         /**
@@ -1147,14 +1179,63 @@ class Compiler implements InjectionAwareInterface
     }
 
     /**
-     * Compiles a "set" statement returning PHP code
+     * Compiles a "set" statement returning PHP code. The method accepts an
+     * array produced by the Volt parser and creates the `set` statement in PHP.
+     * This method is not particularly useful in development, since it requires
+     * advanced knowledge of the Volt parser.
      *
-     * @param array statement
+     * ```php
+     * <?php
      *
-     * @throws \Phalcon\Mvc\View\Engine\Volt\Exception
-     * @return string
+     * use Phalcon\Mvc\View\Engine\Volt\Compiler;
+     *
+     * $compiler = new Compiler();
+     *
+     * // {% set a = ['first': 1] %}
+     * $source = [
+     *     "type" => 306,
+     *     "assignments" => [
+     *         [
+     *             "variable" => [
+     *                 "type" => 265,
+     *                 "value" => "a",
+     *                 "file" => "eval code",
+     *                 "line" => 1
+     *             ],
+     *             "op" => 61,
+     *             "expr" => [
+     *                 "type" => 360,
+     *                 "left" => [
+     *                     [
+     *                         "expr" => [
+     *                             "type" => 258,
+     *                             "value" => "1",
+     *                             "file" => "eval code",
+     *                             "line" => 1
+     *                         ],
+     *                         "name" => "first",
+     *                         "file" => "eval code",
+     *                         "line" => 1
+     *                     ]
+     *                 ],
+     *                 "file" => "eval code",
+     *                 "line" => 1
+     *             ],
+     *             "file" => "eval code",
+     *             "line" => 1
+     *         ]
+     *     ]
+     * ];
+     *
+     * echo $compiler->compileSet($source);
+     * // <?php $a = ['first' => 1]; ?>";
+     * ```
+     *
+     * @phpstan-param mvc_volt_node $statement
+     *
+     * @throws Exception
      */
-    public function compileSet(array! statement) -> string
+    public function compileSet(array statement) -> string
     {
         var assignments, assignment, exprCode, target;
         string compilation;
@@ -1163,7 +1244,7 @@ class Compiler implements InjectionAwareInterface
          * A valid assignment list is required
          */
         if unlikely !fetch assignments, statement["assignments"] {
-            throw new Exception("Corrupted statement");
+            throw new CorruptedStatement();
         }
 
         let compilation = "<?php";
@@ -1221,15 +1302,12 @@ class Compiler implements InjectionAwareInterface
      * Compiles a template into a string
      *
      *```php
-     * echo $compiler->compileString({% raw %}'{{ "hello world" }}'{% endraw %});
+     * echo $compiler->compileString('{{ "hello world" }}');
      *```
      *
-     * @param string viewCode
-     * @param bool extendsMode
-     *
-     * @return string
+     * @throws Exception
      */
-    public function compileString(string! viewCode, bool extendsMode = false) -> string
+    public function compileString(string viewCode, bool extendsMode = false) -> string
     {
         let this->currentPath = "eval code";
 
@@ -1239,13 +1317,11 @@ class Compiler implements InjectionAwareInterface
     /**
      * Compiles a 'switch' statement returning PHP code
      *
-     * @param array statement
-     * @param bool extendsMode
+     * @phpstan-param mvc_volt_node $statement
      *
-     * @throws \Phalcon\Mvc\View\Engine\Volt\Exception
-     * @return string
+     * @throws Exception
      */
-    public function compileSwitch(array! statement, bool extendsMode = false) -> string
+    public function compileSwitch(array statement, bool extendsMode = false) -> string
     {
         var compilation, caseClauses, expr, lines;
 
@@ -1253,7 +1329,7 @@ class Compiler implements InjectionAwareInterface
          * A valid expression is required
          */
         if unlikely !fetch expr, statement["expr"] {
-            throw new Exception("Corrupt statement", statement);
+            throw new CorruptedStatementWithData(statement);
         }
 
         /**
@@ -1273,7 +1349,7 @@ class Compiler implements InjectionAwareInterface
              * responsibility of the user. However, we can clear empty lines and
              * whitespace here to reduce the number of errors.
              *
-             * http://php.net/control-structures.alternative-syntax
+             * https://php.net/control-structures.alternative-syntax
              */
              if strlen(lines) !== 0 {
                 /**
@@ -1303,16 +1379,19 @@ class Compiler implements InjectionAwareInterface
     /**
      * Resolves an expression node in an AST volt tree
      *
-     * @param array expr
+     * @phpstan-param mvc_volt_node $expr
      *
-     * @return string
+     * @throws Exception
      */
-    final public function expression(array! expr) -> string
+    final public function expression(array expr, bool doubleQuotes = false) -> string
     {
-        var exprCode, extensions, items, singleExpr, singleExprCode, name, left,
-            leftCode, right, rightCode, type, startCode, endCode, start, end;
+        var end, endCode, extensions, items, left, name, right, singleExpr,
+            singleExprCode, start, startCode, type,
+            exprCode  = null,
+            leftCode  = "",
+            rightCode = "";
 
-        let exprCode = null, this->exprLevel++;
+        let this->exprLevel++;
 
         /**
          * Check if any of the registered extensions provide compilation for
@@ -1321,7 +1400,7 @@ class Compiler implements InjectionAwareInterface
         let extensions = this->extensions;
 
         loop {
-            if typeof extensions == "array" {
+            if !empty extensions {
                 /**
                  * Notify the extensions about being resolving an expression
                  */
@@ -1330,7 +1409,7 @@ class Compiler implements InjectionAwareInterface
                     [expr]
                 );
 
-                if typeof exprCode == "string" {
+                if typeof exprCode === "string" {
                     break;
                 }
             }
@@ -1340,11 +1419,27 @@ class Compiler implements InjectionAwareInterface
 
                 for singleExpr in expr {
                     let singleExprCode = this->expression(
-                        singleExpr["expr"]
+                        singleExpr["expr"],
+                        doubleQuotes
                     );
 
                     if fetch name, singleExpr["name"] {
-                        let items[] = "'" . name . "' => " . singleExprCode;
+                        /**
+                         * Escape the quotes that are not part of an escape
+                         * sequence. This prevents the key from closing the
+                         * string and adding code to the compiled template.
+                         */
+                        let items[] = "'"
+                            . preg_replace_callback(
+                                "/\\\\.|'/s",
+                                function(matches) {
+                                    return "\\" === substr(matches[0], 0, 1)
+                                        ? matches[0]
+                                        : "\\" . matches[0];
+                                },
+                                name
+                            )
+                            . "' => " . singleExprCode;
                     } else {
                         let items[] = singleExprCode;
                     }
@@ -1368,7 +1463,7 @@ class Compiler implements InjectionAwareInterface
              * Left part of expression is always resolved
              */
             if fetch left, expr["left"] {
-                let leftCode = this->expression(left);
+                let leftCode = this->expression(left, doubleQuotes);
             }
 
             /**
@@ -1399,7 +1494,7 @@ class Compiler implements InjectionAwareInterface
              * From here, right part of expression is always resolved
              */
             if fetch right, expr["right"] {
-                let rightCode = this->expression(right);
+                let rightCode = this->expression(right, doubleQuotes);
             }
 
             let exprCode = null;
@@ -1467,7 +1562,44 @@ class Compiler implements InjectionAwareInterface
                     break;
 
                 case PHVOLT_T_STRING:
-                    let exprCode = "'" . str_replace("'", "\\'", expr["value"]) . "'";
+                    if likely doubleQuotes === false {
+                        /**
+                         * Escape the quotes that are not part of an escape
+                         * sequence. This prevents the value from closing the
+                         * string and adding code to the compiled template.
+                         */
+                        let exprCode = "'"
+                            . preg_replace_callback(
+                                "/\\\\.|'/s",
+                                function(matches) {
+                                    return "\\" === substr(matches[0], 0, 1)
+                                        ? matches[0]
+                                        : "\\" . matches[0];
+                                },
+                                expr["value"]
+                            )
+                            . "'";
+                    } else {
+                        /**
+                         * Read the value as escape sequences and single
+                         * characters. Keep the escape sequences as they are,
+                         * so that PHP can interpret them. Escape the quotes
+                         * and the dollar signs that are not part of an escape
+                         * sequence. This prevents the value from closing the
+                         * string and adding code to the compiled template.
+                         */
+                        let exprCode = "\""
+                            . preg_replace_callback(
+                                "/\\\\.|[\"$]/s",
+                                function(matches) {
+                                    return "\\" === substr(matches[0], 0, 1)
+                                        ? matches[0]
+                                        : "\\" . matches[0];
+                                },
+                                expr["value"]
+                            )
+                            . "\"";
+                    }
                     break;
 
                 case PHVOLT_T_NULL:
@@ -1523,7 +1655,7 @@ class Compiler implements InjectionAwareInterface
                     break;
 
                 case PHVOLT_T_FCALL:
-                    let exprCode = this->functionCall(expr);
+                    let exprCode = this->functionCall(expr, doubleQuotes);
                     break;
 
                 case PHVOLT_T_ENCLOSED:
@@ -1540,7 +1672,7 @@ class Compiler implements InjectionAwareInterface
                      * Evaluate the start part of the slice
                      */
                     if fetch start, expr["start"] {
-                        let startCode = this->expression(start);
+                        let startCode = this->expression(start, doubleQuotes);
                     } else {
                         let startCode = "null";
                     }
@@ -1549,7 +1681,7 @@ class Compiler implements InjectionAwareInterface
                      * Evaluate the end part of the slice
                      */
                     if fetch end, expr["end"] {
-                        let endCode = this->expression(end);
+                        let endCode = this->expression(end, doubleQuotes);
                     } else {
                         let endCode = "null";
                     }
@@ -1622,7 +1754,7 @@ class Compiler implements InjectionAwareInterface
                     break;
 
                 case PHVOLT_T_TERNARY:
-                    let exprCode = "(" . this->expression(expr["ternary"]) . " ? " . leftCode . " : " . rightCode . ")";
+                    let exprCode = "(" . this->expression(expr["ternary"], doubleQuotes) . " ? " . leftCode . " : " . rightCode . ")";
                     break;
 
                 case PHVOLT_T_MINUS:
@@ -1638,9 +1770,7 @@ class Compiler implements InjectionAwareInterface
                     break;
 
                 default:
-                    throw new Exception(
-                        "Unknown expression " . type . " in " . expr["file"] . " on line " . expr["line"]
-                    );
+                    throw new UnknownVoltExpression((int) type, (string) expr["file"], (int) expr["line"]);
             }
 
             break;
@@ -1654,39 +1784,36 @@ class Compiler implements InjectionAwareInterface
     /**
      * Fires an event to registered extensions
      *
-     * @param string name
-     * @param array arguments
+     * @phpstan-param array<array-key, mixed> $arguments
      *
      * @return mixed
      */
-    final public function fireExtensionEvent(string! name, arguments = null) // TODO: Make arguments array
+    final public function fireExtensionEvent(string name, array arguments = [])
     {
         var extensions, extension, status;
 
         let extensions = this->extensions;
 
-        if typeof extensions == "array" {
-            for extension in extensions {
-                /**
-                 * Check if the extension implements the required event name
-                 */
-                if method_exists(extension, name) {
-                    if typeof arguments == "array" {
-                        let status = call_user_func_array(
-                            [extension, name],
-                            arguments
-                        );
-                    } else {
-                        let status = call_user_func([extension, name]);
-                    }
+        for extension in extensions {
+            /**
+             * Check if the extension implements the required event name
+             */
+            if method_exists(extension, name) {
+                if !empty arguments {
+                    let status = call_user_func_array(
+                        [extension, name],
+                        arguments
+                    );
+                } else {
+                    let status = call_user_func([extension, name]);
+                }
 
-                    /**
-                     * Only string statuses means the extension processes
-                     * something
-                     */
-                    if typeof status == "string" {
-                        return status;
-                    }
+                /**
+                 * Only string statuses means the extension processes
+                 * something
+                 */
+                if typeof status == "string" {
+                    return status;
                 }
             }
         }
@@ -1695,28 +1822,30 @@ class Compiler implements InjectionAwareInterface
     /**
      * Resolves function intermediate code into PHP function calls
      *
-     * @param array expr
+     * @phpstan-param mvc_volt_node $expr
      *
-     * @throws \Phalcon\Mvc\View\Engine\Volt\Exception
-     * @return string
+     * @throws Exception
      */
-    public function functionCall(array! expr) -> string
+    public function functionCall(array expr, bool doubleQuotes = false) -> string
     {
-        var code, funcArguments, arguments, nameExpr, nameType, name,
-            extensions, functions, definition, extendedBlocks, block,
-            currentBlock, exprLevel, escapedCode, method, arrayHelpers;
-
-        let code          = null,
+        var arguments, arrayHelpers, block, currentBlock, definition, escapedCode,
+            exprLevel, extendedBlocks, extensions, functions, method, name,
+            nameExpr, nameType, tagService,
+            code          = null,
             funcArguments = null;
+        let nameExpr      = expr["name"],
+            nameType      = nameExpr["type"];
 
+        /**
+         * The TagFactory helpers sometimes receive line endings
+         * as parameters. Using single quotes is not going to make
+         * that work. As such we need to recalculate the arguments
+         */
         if fetch funcArguments, expr["arguments"] {
-            let arguments = this->expression(funcArguments);
+            let arguments = this->expression(funcArguments, doubleQuotes);
         } else {
             let arguments = "";
         }
-
-        let nameExpr = expr["name"],
-            nameType = nameExpr["type"];
 
         /**
          * Check if it's a single function
@@ -1730,7 +1859,7 @@ class Compiler implements InjectionAwareInterface
              */
             let extensions = this->extensions;
 
-            if typeof extensions == "array" {
+            if !empty extensions {
                 /**
                  * Notify the extensions about being compiling a function
                  */
@@ -1771,9 +1900,7 @@ class Compiler implements InjectionAwareInterface
                         }
                     }
 
-                    throw new Exception(
-                        "Invalid definition for user function '" . name . "' in " . expr["file"] . " on line " . expr["line"]
-                    );
+                    throw new InvalidUserFunctionDefinition((string) name, (string) expr["file"], (int) expr["line"]);
                 }
             }
 
@@ -1801,7 +1928,7 @@ class Compiler implements InjectionAwareInterface
                 if typeof extendedBlocks == "array" {
                     let currentBlock = this->currentBlock;
 
-                    if fetch block, extendedBlocks[currentBlock] {
+                    if currentBlock !== null && fetch block, extendedBlocks[currentBlock] {
                         let exprLevel = this->exprLevel;
 
                         if typeof block == "array" {
@@ -1830,17 +1957,27 @@ class Compiler implements InjectionAwareInterface
                         return "'" . escapedCode . "'";
                     }
                 }
+
                 return "''";
             }
 
-            let method = lcfirst(
-                camelize(name)
-            );
+            /**
+             * Check if it's a method in Phalcon\Tag
+             * @todo This needs a lot of refactoring and will break a lot of applications if removed
+             */
+            if name === "preload" {
+                return "$this->preload(" . arguments . ")";
+            }
 
+            /**
+             * Check if it's a method in Phalcon\Tag
+             * @todo This needs a lot of refactoring and will break a lot of applications if removed
+             */
+            let method = lcfirst(camelize(name));
             let arrayHelpers = [
                 "link_to":        true,
                 "image":          true,
-                "form":           true,
+                "form_legacy":    true,
                 "submit_button":  true,
                 "radio_field":    true,
                 "check_field":    true,
@@ -1856,70 +1993,34 @@ class Compiler implements InjectionAwareInterface
                 "image_input":    true
             ];
 
-            /**
-             * Check if it's a method in Phalcon\Tag
-             */
-            if method_exists("Phalcon\\Tag", method) {
+            if method_exists(Tag::class, method) {
                 if isset arrayHelpers[name] {
-                    return "$this->tag->" . method . "([" . arguments . "])";
+                    return "\Phalcon\Tag::" . method . "([" . arguments . "])";
                 }
 
-                return "$this->tag->" . method . "(" . arguments . ")";
+                return "\Phalcon\Tag::" . method . "(" . arguments . ")";
             }
 
             /**
-             * The code below will be activated when Html\Tag is enabled
+             * These are for the TagFactory
              */
-            /**
-            let arrayHelpers = [
-                "button_submit"         : true.
-                "element"               : true.
-                "element_close"         : true.
-                "end_form"              : true.
-                "form"                  : true.
-                "friendly_title"        : true.
-                "get_doc_type"          : true.
-                "get_title"             : true.
-                "get_title_separator"   : true.
-                "image"                 : true.
-                "input_checkbox"        : true.
-                "input_color"           : true.
-                "input_date"            : true.
-                "input_date_time"       : true.
-                "input_date_time_local" : true.
-                "input_email"           : true.
-                "input_file"            : true.
-                "input_hidden"          : true.
-                "input_image"           : true.
-                "input_month"           : true.
-                "input_numeric"         : true.
-                "input_password"        : true.
-                "input_radio"           : true.
-                "input_range"           : true.
-                "input_search"          : true.
-                "input_tel"             : true.
-                "input_text"            : true.
-                "input_time"            : true.
-                "input_url"             : true.
-                "input_week"            : true.
-                "javascript"            : true.
-                "link"                  : true.
-                "prepend_title"         : true.
-                "render_title"          : true.
-                "select"                : true.
-                "stylesheet"            : true.
-                "submit"                : true.
-                "text_area"             : true.
-            ];
+            if this->container !== null && true === this->container->has("tag") {
+                let tagService = this->container->get("tag");
+                if true === tagService->has(name) {
+                    /**
+                     * recalculate the arguments because we need them double
+                     * quoted
+                     */
+                    let funcArguments = null;
+                    if fetch funcArguments, expr["arguments"] {
+                        let arguments = this->expression(funcArguments, true);
+                    } else {
+                        let arguments = "";
+                    }
 
-            if method_exists("Phalcon\\Html\\Tag", method) {
-                if isset arrayHelpers[name] {
-                    return "$this->tag->" . method . "([" . arguments . "])";
+                    return "$this->tag->" . name . "(" . arguments . ")";
                 }
-
-                return "$this->tag->" . method . "(" . arguments . ")";
             }
-            */
 
             /**
              * Get a dynamic URL
@@ -1955,10 +2056,6 @@ class Compiler implements InjectionAwareInterface
                 return "(new Phalcon\\Support\\Version)->getId()";
             }
 
-            if name == "preload" {
-                return "$this->tag->preload(" . arguments . ")";
-            }
-
             /**
              * Read PHP constants in templates
              */
@@ -1972,13 +2069,11 @@ class Compiler implements InjectionAwareInterface
             return "$this->callMacro('" . name . "', [" . arguments . "])";
         }
 
-        return this->expression(nameExpr) . "(" . arguments . ")";
+        return this->expression(nameExpr, doubleQuotes) . "(" . arguments . ")";
     }
 
     /**
      * Returns the path to the last compiled template
-     *
-     * @return string
      */
     public function getCompiledTemplatePath() -> string
     {
@@ -1998,7 +2093,7 @@ class Compiler implements InjectionAwareInterface
     /**
      * Returns the list of extensions registered in Volt
      *
-     * @return array
+     * @phpstan-return list<object>
      */
     public function getExtensions() -> array
     {
@@ -2008,7 +2103,7 @@ class Compiler implements InjectionAwareInterface
     /**
      * Register the user registered filters
      *
-     * @return array
+     * @phpstan-return array<string, mixed>
      */
     public function getFilters() -> array
     {
@@ -2018,7 +2113,7 @@ class Compiler implements InjectionAwareInterface
     /**
      * Register the user registered functions
      *
-     * @return array
+     * @phpstan-return array<string, mixed>
      */
     public function getFunctions() -> array
     {
@@ -2027,12 +2122,8 @@ class Compiler implements InjectionAwareInterface
 
     /**
      * Returns a compiler's option
-     *
-     * @param string option
-     *
-     * @return string|null
      */
-    public function getOption(string! option) -> string | null
+    public function getOption(string option) -> string | null
     {
         var value;
 
@@ -2046,7 +2137,7 @@ class Compiler implements InjectionAwareInterface
     /**
      * Returns the compiler options
      *
-     * @return array
+     * @phpstan-return array<string, mixed>
      */
     public function getOptions() -> array
     {
@@ -2055,8 +2146,6 @@ class Compiler implements InjectionAwareInterface
 
     /**
      * Returns the path that is currently being compiled
-     *
-     * @return string
      */
     public function getTemplatePath() -> string
     {
@@ -2094,27 +2183,24 @@ class Compiler implements InjectionAwareInterface
         }
 
         if unlikely typeof this->prefix != "string" {
-            throw new Exception("The unique compilation prefix is invalid");
+            throw new InvalidCompilationPrefix();
         }
 
         return this->prefix;
     }
-
 
     /**
      * Parses a Volt template returning its intermediate representation
      *
      *```php
      * print_r(
-     *     $compiler->parse("{% raw %}{{ 3 + 2 }}{% endraw %}")
+     *     $compiler->parse("{{ 3 + 2 }}")
      * );
      *```
      *
-     * @param string viewCode
-     *
-     * @return array
+     * @phpstan-return mvc_volt_node
      */
-    public function parse(string! viewCode) -> array
+    public function parse(string viewCode) -> array
     {
         var currentPath = "eval code";
 
@@ -2123,8 +2209,12 @@ class Compiler implements InjectionAwareInterface
 
     /**
      * Resolves filter intermediate code into a valid PHP expression
+     *
+     * @phpstan-param mvc_volt_node $test
+     *
+     * @throws Exception
      */
-    public function resolveTest(array! test, string left) -> string
+    public function resolveTest(array test, string left) -> string
     {
         var type, name, testName;
 
@@ -2136,46 +2226,19 @@ class Compiler implements InjectionAwareInterface
         if type == PHVOLT_T_IDENTIFIER {
             let name = test["value"];
 
-            /**
-             * Empty uses the PHP's empty operator
-             */
-            if name == "empty" {
-                return "empty(" . left . ")";
-            }
-
-            /**
-             * Check if a value is even
-             */
-            if name == "even" {
-                return "(((" . left . ") % 2) == 0)";
-            }
-
-            /**
-             * Check if a value is odd
-             */
-            if name == "odd" {
-                return "(((" . left . ") % 2) != 0)";
-            }
-
-            /**
-             * Check if a value is numeric
-             */
-            if name == "numeric" {
-                return "is_numeric(" . left . ")";
-            }
-
-            /**
-             * Check if a value is scalar
-             */
-            if name == "scalar" {
-                return "is_scalar(" . left . ")";
-            }
-
-            /**
-             * Check if a value is iterable
-             */
-            if name == "iterable" {
-                return "(is_array(" . left . ") || (" . left . ") instanceof Traversable)";
+            switch (name) {
+                case "empty":
+                    return "empty(" . left . ")";
+                case "even":
+                    return "(((" . left . ") % 2) == 0)";
+                case "odd":
+                    return "(((" . left . ") % 2) != 0)";
+                case "numeric":
+                    return "is_numeric(" . left . ")";
+                case "scalar":
+                    return "is_scalar(" . left . ")";
+                case "iterable":
+                    return "(is_array(" . left . ") || (" . left . ") instanceof Traversable)";
             }
 
         }
@@ -2187,22 +2250,13 @@ class Compiler implements InjectionAwareInterface
             let testName = test["name"];
 
             if fetch name, testName["value"] {
-                if name == "divisibleby" {
-                    return "(((" . left . ") % (" . this->expression(test["arguments"]) . ")) == 0)";
-                }
-
-                /**
-                 * Checks if a value is equals to other
-                 */
-                if name == "sameas" {
-                    return "(" . left . ") === (" . this->expression(test["arguments"]) . ")";
-                }
-
-                /**
-                 * Checks if a variable match a type
-                 */
-                if name == "type" {
-                    return "gettype(" . left . ") === (" . this->expression(test["arguments"]) . ")";
+                switch (name) {
+                    case "divisibleby":
+                        return "(((" . left . ") % (" . this->expression(test["arguments"]) . ")) == 0)";
+                    case "sameas":
+                        return "(" . left . ") === (" . this->expression(test["arguments"]) . ")";
+                    case "type":
+                        return "gettype(" . left . ") === (" . this->expression(test["arguments"]) . ")";
                 }
             }
         }
@@ -2226,23 +2280,39 @@ class Compiler implements InjectionAwareInterface
      *
      * @param mixed value
      */
-    public function setOption(string! option, value)
+    public function setOption(string option, value) -> <static>
     {
         let this->options[option] = value;
+
+        /**
+         * The virtual paths use the "separator" option
+         */
+        let this->virtualPaths = [];
+
+        return this;
     }
 
     /**
      * Sets the compiler options
+     *
+     * @phpstan-param array<string, mixed> $options
      */
-    public function setOptions(array! options)
+    public function setOptions(array options) -> <static>
     {
         let this->options = options;
+
+        /**
+         * The virtual paths use the "separator" option
+         */
+        let this->virtualPaths = [];
+
+        return this;
     }
 
     /**
      * Set a unique prefix to be used as prefix for compiled variables
      */
-    public function setUniquePrefix(string! prefix) -> <Compiler>
+    public function setUniquePrefix(string prefix) -> <static>
     {
         let this->prefix = prefix;
 
@@ -2251,12 +2321,26 @@ class Compiler implements InjectionAwareInterface
 
     /**
      * Compiles a Volt source code returning a PHP plain version
+     *
+     * @phpstan-return array<array-key, mixed>|string
      */
-    protected function compileSource(string! viewCode, bool extendsMode = false) -> string
+    protected function compileSource(string viewCode, bool extendsMode = false) -> array | string
     {
         var currentPath, intermediate, extended, finalCompilation, blocks,
             extendedBlocks, name, block, blockCompilation, localBlock,
             compilation, options, autoescape;
+
+        /**
+         * Reset the compilation state. A clone (extends, include) also gets
+         * the state of its parent.
+         */
+        let this->extended = false;
+        let this->extendedBlocks = false;
+        let this->blocks = null;
+        let this->level = 0;
+        let this->foreachLevel = 0;
+        let this->blockLevel = 0;
+        let this->exprLevel = 0;
 
         let currentPath = this->currentPath;
 
@@ -2271,7 +2355,7 @@ class Compiler implements InjectionAwareInterface
              */
             if fetch autoescape, options["autoescape"] {
                 if unlikely typeof autoescape != "boolean" {
-                    throw new Exception("'autoescape' must be bool");
+                    throw new InvalidOptionType("autoescape", "bool");
                 }
 
                 let this->autoescape = autoescape;
@@ -2284,7 +2368,7 @@ class Compiler implements InjectionAwareInterface
          * The parsing must return a valid array
          */
         if unlikely typeof intermediate != "array" {
-            throw new Exception("Invalid intermediate representation");
+            throw new InvalidIntermediateRepresentation();
         }
 
         let compilation = this->statementList(intermediate, extendsMode);
@@ -2307,12 +2391,21 @@ class Compiler implements InjectionAwareInterface
             let blocks = this->blocks;
             let extendedBlocks = this->extendedBlocks;
 
+            /**
+             * When the local template extends a parent but does not define any
+             * blocks of its own, "blocks" is null. Coerce it to an array so
+             * array_key_exists() below never receives a non-array value.
+             */
+            if typeof blocks != "array" {
+                let blocks = [];
+            }
+
             for name, block in extendedBlocks {
                 /**
                  * If name is a string then is a block name
                  */
                 if typeof name == "string" {
-                    if isset blocks[name] {
+                    if array_key_exists(name, blocks) {
                         /**
                          * The block is set in the local template
                          */
@@ -2362,9 +2455,16 @@ class Compiler implements InjectionAwareInterface
         if extendsMode {
             /**
              * In extends mode we return the template blocks instead of the
-             * compilation
+             * compilation. A template that defines no blocks of its own gives
+             * back an empty array.
              */
-            return this->blocks;
+            let blocks = this->blocks;
+
+            if typeof blocks != "array" {
+                let blocks = [];
+            }
+
+            return blocks;
         }
 
         return compilation;
@@ -2372,10 +2472,28 @@ class Compiler implements InjectionAwareInterface
 
     /**
      * Gets the final path with VIEW
+     *
+     * @return string
      */
     protected function getFinalPath(string path)
     {
-        var view, viewsDirs, viewsDir;
+        var view, viewsDirs,
+            viewsDir = "";
+
+        /**
+         * Absolute paths are used as they are
+         */
+        if this->isAbsolutePath(path) {
+            return path;
+        }
+
+        /**
+         * Paths starting with "./" or "../" are resolved relative to the
+         * directory of the template currently being compiled
+         */
+        if starts_with(path, "./") || starts_with(path, "../") {
+            return dirname(this->currentPath) . DIRECTORY_SEPARATOR . path;
+        }
 
         let view = this->view;
 
@@ -2384,7 +2502,7 @@ class Compiler implements InjectionAwareInterface
 
             if typeof viewsDirs == "array" {
                 for viewsDir in viewsDirs {
-                    if file_exists(viewsDir . path) {
+                    if this->phpFileExists(viewsDir . path) {
                         return viewsDir . path;
                     }
                 }
@@ -2401,8 +2519,12 @@ class Compiler implements InjectionAwareInterface
 
     /**
      * Resolves filter intermediate code into PHP function calls
+     *
+     * @phpstan-param mvc_volt_node $filter
+     *
+     * @throws Exception
      */
-    final protected function resolveFilter(array! filter, string left) -> string
+    final protected function resolveFilter(array filter, string left) -> string
     {
         var code, type, functionName, name, file, line, extensions, filters,
             funcArguments, arguments, definition;
@@ -2420,9 +2542,7 @@ class Compiler implements InjectionAwareInterface
                 /**
                  * Unknown filter throw an exception
                  */
-                throw new Exception(
-                    "Unknown filter type in " . filter["file"] . " on line " . filter["line"]
-                );
+                throw new UnknownVoltFilterType((string) filter["file"], (int) filter["line"]);
             }
 
             let functionName = filter["name"],
@@ -2472,7 +2592,7 @@ class Compiler implements InjectionAwareInterface
          */
         let extensions = this->extensions;
 
-        if typeof extensions == "array" {
+        if !empty extensions {
             /**
              * Notify the extensions about being compiling a function
              */
@@ -2514,209 +2634,88 @@ class Compiler implements InjectionAwareInterface
             /**
              * Invalid filter definition throw an exception
              */
-            throw new Exception(
-                "Invalid definition for user filter '" . name . "' in " . filter["file"] . " on line " . filter["line"]
-            );
+            throw new InvalidUserFilterDefinition((string) name, (string) filter["file"], (int) filter["line"]);
         }
 
-        /**
-         * "length" uses the length method implemented in the Volt adapter
-         */
-        if name == "length" {
-            return "$this->length(" . arguments . ")";
+        switch (name) {
+            case "abs":
+                return "abs(" . arguments . ")";
+            case "capitalize":
+                return "ucwords(" . arguments . ")";
+            case "convert_encoding":
+                return "$this->convertEncoding(" . arguments . ")";
+            case "default":
+                return "(empty(" . left . ") ? ("
+                    . arguments . ") : ("
+                    . left . "))";
+            case "e":
+            case "escape":
+                return "$this->escaper->html(" . arguments . ")";
+            case "escape_attr":
+                return "$this->escaper->attributes(" . arguments . ")";
+            case "escape_css":
+                return "$this->escaper->css(" . arguments . ")";
+            case "escape_js":
+                return "$this->escaper->js(" . arguments . ")";
+            case "format":
+                return "sprintf(" . arguments . ")";
+            case "join":
+                return "join(" . this->expression(funcArguments[1]["expr"])
+                    . ", " . this->expression(funcArguments[0]["expr"]) . ")";
+            case "json_encode":
+                return "json_encode(" . arguments . ")";
+            case "json_decode":
+                return "json_decode(" . arguments . ")";
+            case "keys":
+                return "array_keys(" . arguments . ")";
+            case "left_trim":
+                return "ltrim(" . arguments . ")";
+            case "length":
+                return "$this->length(" . arguments . ")";
+            case "lower":
+            case "lowercase":
+                if this->container !== null && true === this->container->has("helper") {
+                    return "$this->helper->lower(" . arguments . ")";
+                } else {
+                    return "strtolower(" . arguments . ")";
+                }
+            case "right_trim":
+                return "rtrim(" . arguments . ")";
+            case "nl2br":
+                return "nl2br(" . arguments . ")";
+            case "slashes":
+                return "addslashes(" . arguments . ")";
+            case "slice":
+                return "$this->slice(" . arguments . ")";
+            case "sort":
+                return "$this->sort(" . arguments . ")";
+            case "stripslashes":
+                return "stripslashes(" . arguments . ")";
+            case "striptags":
+                return "strip_tags(" . arguments . ")";
+            case "trim":
+                return "trim(" . arguments . ")";
+            case "upper":
+            case "uppercase":
+                if this->container !== null && true === this->container->has("helper") {
+                    return "$this->helper->upper(" . arguments . ")";
+                } else {
+                    return "strtoupper(" . arguments . ")";
+                }
+            case "url_encode":
+                return "urlencode(" . arguments . ")";
         }
 
-        /**
-         * "e"/"escape" filter uses the escaper component
-         */
-        if name == "e" || name == "escape" {
-            return "$this->escaper->escapeHtml(" . arguments . ")";
-        }
-
-        /**
-         * "escape_css" filter uses the escaper component to filter CSS
-         */
-        if name == "escape_css" {
-            return "$this->escaper->escapeCss(" . arguments . ")";
-        }
-
-        /**
-         * "escape_js" filter uses the escaper component to escape JavaScript
-         */
-        if name == "escape_js" {
-            return "$this->escaper->escapeJs(" . arguments . ")";
-        }
-
-        /**
-         * "escape_attr" filter uses the escaper component to escape HTML
-         * attributes
-         */
-        if name == "escape_attr" {
-            return "$this->escaper->escapeHtmlAttr(" . arguments . ")";
-        }
-
-        /**
-         * "trim" calls the "trim" function in the PHP userland
-         */
-        if name == "trim" {
-            return "trim(" . arguments . ")";
-        }
-
-        /**
-         * "left_trim" calls the "ltrim" function in the PHP userland
-         */
-        if name == "left_trim" {
-            return "ltrim(" . arguments . ")";
-        }
-
-        /**
-         * "right_trim" calls the "rtrim" function in the PHP userland
-         */
-        if name == "right_trim" {
-            return "rtrim(" . arguments . ")";
-        }
-
-        /**
-         * "striptags" calls the "strip_tags" function in the PHP userland
-         */
-        if name == "striptags" {
-            return "strip_tags(" . arguments . ")";
-        }
-
-        /**
-         * "url_encode" calls the "urlencode" function in the PHP userland
-         */
-        if name == "url_encode" {
-            return "urlencode(" . arguments . ")";
-        }
-
-        /**
-         * "slashes" calls the "addslashes" function in the PHP userland
-         */
-        if name == "slashes" {
-            return "addslashes(" . arguments . ")";
-        }
-
-        /**
-         * "stripslashes" calls the "stripslashes" function in the PHP userland
-         */
-        if name == "stripslashes" {
-            return "stripslashes(" . arguments . ")";
-        }
-
-        /**
-         * "nl2br" calls the "nl2br" function in the PHP userland
-         */
-        if name == "nl2br" {
-            return "nl2br(" . arguments . ")";
-        }
-
-        /**
-         * "keys" uses calls the "array_keys" function in the PHP userland
-         */
-        if name == "keys" {
-            return "array_keys(" . arguments . ")";
-        }
-
-        /**
-         * "join" uses calls the "join" function in the PHP userland
-         */
-        if name == "join" {
-            return "join('" . funcArguments[1]["expr"]["value"] . "', " . funcArguments[0]["expr"]["value"] . ")";
-        }
-
-        /**
-         * "lower"/"lowercase" calls the "strtolower" function or
-         * "mb_strtolower" if the mbstring extension is loaded
-         */
-        if name == "lower" || name == "lowercase" {
-            return "strtolower(" . arguments . ")";
-        }
-
-        /**
-         * "upper"/"uppercase" calls the "strtoupper" function or
-         * "mb_strtoupper" if the mbstring extension is loaded
-         */
-        if name == "upper" || name == "uppercase" {
-            return "strtoupper(" . arguments . ")";
-        }
-
-        /**
-         * "capitalize" filter calls "ucwords"
-         */
-        if name == "capitalize" {
-            return "ucwords(" . arguments . ")";
-        }
-
-        /**
-         * "sort" calls "sort" method in the engine adapter
-         */
-        if name == "sort" {
-            return "$this->sort(" . arguments . ")";
-        }
-
-        /**
-         * "json_encode" calls the "json_encode" function in the PHP userland
-         */
-        if name == "json_encode" {
-            return "json_encode(" . arguments . ")";
-        }
-
-        /**
-         * "json_decode" calls the "json_decode" function in the PHP userland
-         */
-        if name == "json_decode" {
-            return "json_decode(" . arguments . ")";
-        }
-
-        /**
-         * "format" calls the "sprintf" function in the PHP userland
-         */
-        if name == "format" {
-            return "sprintf(" . arguments . ")";
-        }
-
-        /**
-         * "abs" calls the "abs" function in the PHP userland
-         */
-        if name == "abs" {
-            return "abs(" . arguments . ")";
-        }
-
-        /**
-         * "slice" slices string/arrays/traversable objects
-         */
-        if name == "slice" {
-            return "$this->slice(" . arguments . ")";
-        }
-
-        /**
-         * "default" checks if a variable is empty
-         */
-        if name == "default" {
-            return "(empty(" . left . ") ? (" . arguments . ") : (" . left . "))";
-        }
-
-        /**
-         * This function uses mbstring or iconv to convert strings from one
-         * charset to another
-         */
-        if name == "convert_encoding" {
-            return "$this->convertEncoding(" . arguments . ")";
-        }
-
-        /**
-         * Unknown filter throw an exception
-         */
-        throw new Exception(
-            "Unknown filter \"" . name . "\" in " . filter["file"] . " on line " . filter["line"]
-        );
+        throw new UnknownVoltFilter((string) name, (string) filter["file"], (int) filter["line"]);
     }
 
     /**
      * Traverses a statement list compiling each of its nodes
+     *
+     * @phpstan-param mvc_volt_node $statements
+     * @phpstan-return string
      */
-    final protected function statementList(array! statements, bool extendsMode = false) -> string
+    final protected function statementList(array statements, bool extendsMode = false) -> string
     {
         var extended, blockMode, compilation, extensions, statement,
             tempCompilation, type, blockName, blockStatements, blocks, path,
@@ -2725,7 +2724,7 @@ class Compiler implements InjectionAwareInterface
         /**
          * Nothing to compile
          */
-        if !count(statements) {
+        if empty statements {
             return "";
         }
 
@@ -2743,31 +2742,29 @@ class Compiler implements InjectionAwareInterface
 
         let compilation = null;
 
-        let extensions = this->extensions;
-
         for statement in statements {
             /**
              * All statements must be arrays
              */
             if unlikely typeof statement != "array" {
-                throw new Exception("Corrupted statement");
+                throw new CorruptedStatement();
             }
 
             /**
              * Check if the statement is valid
              */
             if unlikely !isset statement["type"] {
-                throw new Exception(
-                    "Invalid statement in " . statement["file"] . " on line " . statement["line"],
-                    statement
-                );
+                throw new InvalidStatement((string) statement["file"], (int) statement["line"], statement);
             }
 
             /**
              * Check if extensions have implemented custom compilation for this
-             * statement
+             * statement. Read the property for each statement: a function or
+             * a filter can add an extension during the compilation.
              */
-            if typeof extensions == "array" {
+            let extensions = this->extensions;
+
+            if !empty extensions {
                 /**
                  * Notify the extensions about being resolving a statement
                  */
@@ -2794,7 +2791,10 @@ class Compiler implements InjectionAwareInterface
             switch type {
 
                 case PHVOLT_T_RAW_FRAGMENT:
-                    let compilation .= statement["value"];
+                    if isset statement["value"] {
+                        let compilation .= statement["value"];
+                    }
+
                     break;
 
                 case PHVOLT_T_IF:
@@ -2838,7 +2838,6 @@ class Compiler implements InjectionAwareInterface
                     break;
 
                 case PHVOLT_T_BLOCK:
-
                     /**
                      * Block statement
                      */
@@ -2879,7 +2878,6 @@ class Compiler implements InjectionAwareInterface
                     break;
 
                 case PHVOLT_T_EXTENDS:
-
                     /**
                      * Extends statement
                      */
@@ -2902,11 +2900,11 @@ class Compiler implements InjectionAwareInterface
                     );
 
                     /**
-                     * If the compilation doesn't return anything we include the
+                     * If the compilation does not return anything we include the
                      * compiled path
                      */
                     if tempCompilation === null {
-                        let tempCompilation = file_get_contents(
+                        let tempCompilation = this->phpFileGetContents(
                             subCompiler->getCompiledTemplatePath()
                         );
                     }
@@ -2988,9 +2986,7 @@ class Compiler implements InjectionAwareInterface
                     break;
 
                 default:
-                    throw new Exception(
-                        "Unknown statement " . type . " in " . statement["file"] . " on line " . statement["line"]
-                    );
+                    throw new UnknownVoltStatement((int) type, (string) statement["file"], (int) statement["line"]);
 
             }
         }
@@ -3012,7 +3008,7 @@ class Compiler implements InjectionAwareInterface
 
         let this->level--;
 
-        return compilation;
+        return (string) compilation;
     }
 
     /**
@@ -3060,5 +3056,62 @@ class Compiler implements InjectionAwareInterface
          * Is an array but not a statement list?
          */
         return statements;
+    }
+
+    /**
+     * Checks whether a path is absolute (Unix root, Windows UNC or drive)
+     */
+    private function isAbsolutePath(string path) -> bool
+    {
+        /**
+         * Unix absolute path or Windows UNC path
+         */
+        if starts_with(path, "/") || starts_with(path, "\\") {
+            return true;
+        }
+
+        /**
+         * Windows absolute path with a drive letter, e.g. "C:\" or "C:/"
+         */
+        if strlen(path) >= 2 && ctype_alpha(substr(path, 0, 1)) && substr(path, 1, 1) === ":" {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @phpstan-param mvc_volt_node $expression
+     */
+    private function isTagFactory(array expression) -> bool
+    {
+        var left, leftValue, name;
+
+        /**
+         * This will check recursively:
+         * - If we have a "name" array.
+         * - If the "name" has a "left" sub-array
+         * - If the "left" sub-array has a "value" of "tag"
+         * - If the "left" has another sub-array then recurse
+         */
+        if fetch name, expression["name"] {
+            if fetch left, name["left"] {
+                /**
+                 * There is a value, get it and check it
+                 */
+                if fetch leftValue, left["value"] {
+                    return leftValue === "tag";
+                } else {
+                    /**
+                     * There is a "name" so that is nested, recursion
+                     */
+                    if isset left["name"] && typeof left["name"] === "array" {
+                        return this->isTagFactory(left);
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 }

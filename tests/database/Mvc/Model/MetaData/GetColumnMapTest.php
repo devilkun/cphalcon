@@ -1,0 +1,140 @@
+<?php
+
+/**
+ * This file is part of the Phalcon Framework.
+ *
+ * (c) Phalcon Team <team@phalcon.io>
+ *
+ * For the full copyright and license information, please view the
+ * LICENSE.txt file that was distributed with this source code.
+ */
+
+declare(strict_types=1);
+
+namespace Phalcon\Tests\Database\Mvc\Model\MetaData;
+
+use Phalcon\Mvc\Model\MetaData;
+use Phalcon\Mvc\Model\MetaData\Exceptions\CorruptedMetaData;
+use Phalcon\Tests\AbstractDatabaseTestCase;
+use Phalcon\Tests\Support\Models\Invoices;
+use Phalcon\Tests\Support\Models\InvoicesMap;
+use Phalcon\Tests\Support\Traits\DiTrait;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Group;
+use ReflectionClass;
+
+final class GetColumnMapTest extends AbstractDatabaseTestCase
+{
+    use DiTrait;
+
+    /**
+     * Executed before each test
+     */
+    public function setUp(): void
+    {
+        $this->setNewFactoryDefault();
+        $this->setDatabase();
+    }
+
+    /**
+     * @return array[]
+     */
+    public static function getExamples(): array
+    {
+        return [
+            [
+                'metadataMemory',
+            ],
+            [
+                'metadataApcu',
+            ],
+            [
+                'metadataRedis',
+            ],
+            [
+                'metadataLibmemcached',
+            ],
+        ];
+    }
+
+    /**
+     * @author       Phalcon Team <team@phalcon.io>
+     * @since        2020-02-01
+     */
+    #[Group('mysql')]
+    #[Group('pgsql')]
+    #[Group('sqlite')]
+    #[DataProvider('getExamples')]
+    public function testMvcModelMetadataGetColumnMap(
+        string $service
+    ): void {
+        $adapter = $this->newService($service);
+        $adapter->setDi($this->container);
+        $connection = self::getPdoConnection();
+
+        $adapter->reset();
+
+        $this->container->setShared('modelsMetadata', $adapter);
+
+        /** @var MetaData $metadata */
+        $metadata = $this->container->get('modelsMetadata');
+        $model    = new Invoices();
+
+        $this->assertNull($metadata->getColumnMap($model));
+
+        $model    = new InvoicesMap();
+        $expected = [
+            'inv_id'          => 'id',
+            'inv_cst_id'      => 'cst_id',
+            'inv_status_flag' => 'status_flag',
+            'inv_title'       => 'title',
+            'inv_total'       => 'total',
+            'inv_created_at'  => 'created_at',
+        ];
+
+        $this->assertEquals($expected, $metadata->getColumnMap($model));
+
+        $this->assertTrue($adapter->isEmpty());
+
+        /**
+         * Double check it can get from cache systems and not memory
+         */
+        $adapter = $this->newService($service);
+        $this->container->setShared('modelsMetadata', $adapter);
+        $adapter->setDi($this->container);
+
+        $this->assertNotEquals($adapter, $metadata);
+
+        $this->assertTrue($adapter->isEmpty());
+
+        $this->assertEquals($expected, $adapter->getColumnMap($model));
+    }
+
+    /**
+     * A corrupt column-map slot raises `CorruptedMetaData` rather than a
+     * `TypeError` from the reader, matching cphalcon.
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-09-04
+     */
+    #[Group('mysql')]
+    #[Group('pgsql')]
+    #[Group('sqlite')]
+    public function testMvcModelMetaDataGetColumnMapCorrupt(): void
+    {
+        $model = new Invoices();
+        $meta  = new MetaData\Memory();
+        $key   = mb_strtolower(get_class($model));
+
+        $reflection = new ReflectionClass(MetaData::class);
+        $columnMap  = $reflection->getProperty('columnMap');
+        $columnMap->setValue(
+            $meta,
+            [$key => [MetaData::MODELS_COLUMN_MAP => 'not-an-array']]
+        );
+
+        $this->expectException(CorruptedMetaData::class);
+
+        $meta->getColumnMap($model);
+    }
+}

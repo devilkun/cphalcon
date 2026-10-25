@@ -1,6 +1,6 @@
 
 /**
- * This file is part of the Phalcon.
+ * This file is part of the Phalcon Framework.
  *
  * (c) Phalcon Team <team@phalcon.io>
  *
@@ -10,43 +10,31 @@
 
 namespace Phalcon\Support\Helper\Str;
 
+use Phalcon\Traits\Support\Helper\Str\CamelizeTrait;
+
 /**
- * Converts strings to camelize style
+ * Converts strings to upperCamelCase or lowerCamelCase
  */
 class Camelize
 {
+    use CamelizeTrait;
+
     /**
      * @param string      $text
      * @param string|null $delimiters
+     * @param bool        $lowerFirst
      *
      * @return string
      */
     public function __invoke(
         string text,
-        string delimiters = null
+        string delimiters = null,
+        bool lowerFirst = false
     ) -> string {
-        var delims, exploded, output;
-
-        if !delimiters {
-            let delims = "_-";
-        } else {
-            let delims = delimiters;
+        if delimiters === null {
+            let delimiters = "-_";
         }
 
-        let exploded   = preg_split(
-            "/[" . delims . "]+/",
-            text,
-            -1,
-            PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY
-        );
-
-        let output     = array_map(
-            function (element) {
-                return ucfirst(mb_strtolower(element));
-            },
-            exploded
-        );
-
-        return implode("", output);
+        return this->toCamelize(text, delimiters, lowerFirst);
     }
 }

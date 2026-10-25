@@ -12,36 +12,38 @@ namespace Phalcon\Logger\Formatter;
 
 use JsonException;
 use Phalcon\Logger\Item;
+use Phalcon\Traits\Support\Helper\Json\EncodeTrait;
 
 /**
- * Phalcon\Logger\Formatter\Json
- *
  * Formats messages using JSON encoding
  */
 class Json extends AbstractFormatter
 {
+    use EncodeTrait;
+
     /**
      * Json constructor.
-     *
-     * @param string $dateFormat
      */
-    public function __construct(string dateFormat = "c")
-    {
-        let this->dateFormat = dateFormat;
+    public function __construct(
+        string dateFormat = "c",
+        string interpolatorLeft = "%",
+        string interpolatorRight = "%"
+    ) {
+        let this->dateFormat        = dateFormat;
+        let this->interpolatorLeft  = interpolatorLeft;
+        let this->interpolatorRight = interpolatorRight;
     }
 
     /**
      * Applies a format to a message before sent it to the internal log
      *
-     * @param Item $item
-     *
-     * @return string
      * @throws JsonException
      */
     public function format(<Item> item) -> string
     {
         var message, options;
 
+        let message = this->getInterpolatedMessage(item, item->getMessage());
         let options = JSON_HEX_TAG
             + JSON_HEX_APOS
             + JSON_HEX_AMP
@@ -49,12 +51,7 @@ class Json extends AbstractFormatter
             + JSON_UNESCAPED_SLASHES
             + JSON_THROW_ON_ERROR;
 
-        let message = this->toInterpolate(
-            item->getMessage(),
-            item->getContext()
-        );
-
-        return json_encode(
+        return this->toEncode(
             [
                 "level"     : item->getLevelName(),
                 "message"   : message,

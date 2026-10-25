@@ -23,13 +23,11 @@
  * file that was distributed with this source code.
  */
 /**
- * Phalcon\Mvc\Router\Exception
- *
  * Exceptions thrown in Phalcon\Mvc\Router will use this class
  */
 ZEPHIR_INIT_CLASS(Phalcon_Mvc_Router_Exception)
 {
-	ZEPHIR_REGISTER_CLASS_EX(Phalcon\\Mvc\\Router, Exception, phalcon, mvc_router_exception, phalcon_exception_ce, NULL, 0);
+	ZEPHIR_REGISTER_CLASS_EX(Phalcon\\Mvc\\Router, Exception, phalcon, mvc_router_exception, zend_ce_exception, NULL, 0);
 
 	return SUCCESS;
 }

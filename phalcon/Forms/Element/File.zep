@@ -10,20 +10,10 @@
 
 namespace Phalcon\Forms\Element;
 
-use Phalcon\Tag;
-
 /**
  * Component INPUT[type=file] for forms
  */
 class File extends AbstractElement
 {
-    /**
-     * Renders the element widget returning HTML
-     */
-    public function render(array attributes = []) -> string
-    {
-        return Tag::fileField(
-            this->prepareAttributes(attributes)
-        );
-    }
+    protected string method = "inputFile";
 }

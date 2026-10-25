@@ -10,20 +10,10 @@
 
 namespace Phalcon\Forms\Element;
 
-use Phalcon\Tag;
-
 /**
  * Component INPUT[type=date] for forms
  */
 class Date extends AbstractElement
 {
-    /**
-     * Renders the element widget returning html
-     */
-    public function render(array attributes = []) -> string
-    {
-        return Tag::dateField(
-            this->prepareAttributes(attributes)
-        );
-    }
+    protected string method = "inputDate";
 }

@@ -10,35 +10,40 @@
 
 namespace Phalcon\Encryption\Crypt;
 
+use Exception as BaseException;
 use Phalcon\Encryption\Crypt;
+use Phalcon\Encryption\Crypt\Exception\Exception;
+use Phalcon\Encryption\Crypt\Padding\Ansi;
+use Phalcon\Encryption\Crypt\Padding\Iso10126;
+use Phalcon\Encryption\Crypt\Padding\IsoIek;
+use Phalcon\Encryption\Crypt\Padding\Noop;
 use Phalcon\Encryption\Crypt\Padding\PadInterface;
+use Phalcon\Encryption\Crypt\Padding\Pkcs7;
+use Phalcon\Encryption\Crypt\Padding\Space;
+use Phalcon\Encryption\Crypt\Padding\Zero;
 use Phalcon\Factory\AbstractFactory;
-use Phalcon\Support\Helper\Arr\Get;
 
 /**
- * Class PadFactory
- *
- * @package Phalcon\Crypt
+ * Factory for creating pad classes
  */
 class PadFactory extends AbstractFactory
 {
     /**
-     * @var string
-     */
-    protected exception = "Phalcon\\Encryption\\Crypt\\Exception\\Exception";
-
-    /**
      * AdapterFactory constructor.
+     *
+     * @param array<string, string> $services
      */
-    public function __construct(array! services = [])
+    public function __construct(array services = [])
     {
         this->init(services);
     }
 
     /**
      * Create a new instance of the adapter
+     *
+     * @throws BaseException
      */
-    public function newInstance(string! name) -> <PadInterface>
+    public function newInstance(string name) -> <PadInterface>
     {
         var definition;
 
@@ -50,16 +55,13 @@ class PadFactory extends AbstractFactory
     /**
      * Gets a Crypt pad constant and returns the unique service name for the
      * padding class
-     *
-     * @param int $number
-     *
-     * @return string
      */
     public function padNumberToService(int number) -> string
     {
         array map;
 
         let map = [
+            Crypt::PADDING_DEFAULT        : "noop",
             Crypt::PADDING_ANSI_X_923     : "ansi",
             Crypt::PADDING_ISO_10126      : "iso10126",
             Crypt::PADDING_ISO_IEC_7816_4 : "isoiek",
@@ -68,22 +70,37 @@ class PadFactory extends AbstractFactory
             Crypt::PADDING_ZERO           : "zero"
         ];
 
-        return (new Get())->__invoke(map, number, "noop");
+        if unlikely !isset map[number] {
+            throw this->getException(
+                "Unknown padding constant " . number
+            );
+        }
+
+        return map[number];
     }
 
     /**
-     * @return string[]
+     * @return class-string<\Exception>
+     */
+    protected function getExceptionClass() -> string
+    {
+        return Exception::class;
+    }
+
+    /**
+     * @return array<string, string>
      */
     protected function getServices() -> array
     {
         return [
-            "ansi"     : "Phalcon\\Encryption\\Crypt\\Padding\\Ansi",
-            "iso10126" : "Phalcon\\Encryption\\Crypt\\Padding\\Iso10126",
-            "isoiek"   : "Phalcon\\Encryption\\Crypt\\Padding\\IsoIek",
-            "noop"     : "Phalcon\\Encryption\\Crypt\\Padding\\Noop",
-            "pjcs7"    : "Phalcon\\Encryption\\Crypt\\Padding\\Pkcs7",
-            "space"    : "Phalcon\\Encryption\\Crypt\\Padding\\Space",
-            "zero"     : "Phalcon\\Encryption\\Crypt\\Padding\\Zero"
+            "ansi"     : Ansi::class,
+            "iso10126" : Iso10126::class,
+            "isoiek"   : IsoIek::class,
+            "noop"     : Noop::class,
+            "pjcs7"    : Pkcs7::class,
+            "pkcs7"    : Pkcs7::class,
+            "space"    : Space::class,
+            "zero"     : Zero::class
         ];
     }
 }

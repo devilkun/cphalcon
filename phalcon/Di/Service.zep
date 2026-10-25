@@ -11,7 +11,10 @@
 namespace Phalcon\Di;
 
 use Closure;
+use Phalcon\Contracts\Di\DiTypes;
 use Phalcon\Di\Exception\ServiceResolutionException;
+use Phalcon\Di\Exceptions\DefinitionMustBeArrayForRead;
+use Phalcon\Di\Exceptions\DefinitionMustBeArrayForUpdate;
 use Phalcon\Di\Service\Builder;
 
 /**
@@ -25,6 +28,10 @@ use Phalcon\Di\Service\Builder;
  *
  * $request = service->resolve();
  *```
+ *
+ * @phpstan-import-type di_parameters from DiTypes
+ * @phpstan-import-type di_service_argument from DiTypes
+ * @phpstan-import-type di_service_definition from DiTypes
  */
 class Service implements ServiceInterface
 {
@@ -33,15 +40,9 @@ class Service implements ServiceInterface
      */
     protected definition;
 
-    /**
-     * @var bool
-     */
-    protected resolved = false;
+    protected bool resolved = false;
 
-    /**
-     * @var bool
-     */
-    protected shared = false;
+    protected bool shared = false;
 
     /**
      * @var mixed|null
@@ -49,7 +50,7 @@ class Service implements ServiceInterface
     protected sharedInstance = null;
 
     /**
-     * Phalcon\Di\Service
+     * Service constructor.
      */
     final public function __construct(var definition, bool shared = false)
     {
@@ -72,20 +73,16 @@ class Service implements ServiceInterface
      */
     public function getParameter(int position)
     {
-        var definition, arguments, parameter;
+        var arguments, parameter;
 
-        let definition = this->definition;
-
-        if unlikely typeof definition != "array" {
-            throw new Exception(
-                "Definition must be an array to obtain its parameters"
-            );
+        if unlikely typeof this->definition !== "array" {
+            throw new DefinitionMustBeArrayForRead();
         }
 
         /**
          * Update the parameter
          */
-        if fetch arguments, definition["arguments"] {
+        if fetch arguments, this->definition["arguments"] {
             if fetch parameter, arguments[position] {
                 return parameter;
             }
@@ -113,37 +110,30 @@ class Service implements ServiceInterface
     /**
      * Resolves the service
      *
-     * @param array parameters
+     * @phpstan-param di_parameters|null $parameters
      */
     public function resolve(parameters = null, <DiInterface> container = null) -> var
     {
         bool found;
-        var shared, definition, sharedInstance, instance, builder;
-
-        let shared = this->shared;
+        var definition, instance, builder;
 
         /**
          * Check if the service is shared
          */
-        if shared {
-            let sharedInstance = this->sharedInstance;
-            if sharedInstance !== null {
-                return sharedInstance;
-            }
+        if this->shared && this->sharedInstance !== null {
+            return this->sharedInstance;
         }
 
         let found = true,
             instance = null;
 
         let definition = this->definition;
-        if typeof definition == "string" {
+        if typeof definition === "string" {
             /**
              * String definitions can be class names without implicit parameters
              */
-            if container !== null {
-                let instance = container->get(definition, parameters);
-            } elseif class_exists(definition) {
-                if typeof parameters == "array" && count(parameters) {
+            if class_exists(definition) {
+                if typeof parameters == "array" && !empty parameters {
                     let instance = create_instance_params(
                         definition,
                         parameters
@@ -155,18 +145,17 @@ class Service implements ServiceInterface
                 let found = false;
             }
         } else {
-
             /**
              * Object definitions can be a Closure or an already resolved
              * instance
              */
-            if typeof definition == "object" {
+            if typeof definition === "object" {
                 if definition instanceof Closure {
 
                     /**
                      * Bounds the closure to the current DI
                      */
-                    if typeof container == "object" {
+                    if container !== null {
                         let definition = Closure::bind(definition, container);
                     }
 
@@ -185,7 +174,7 @@ class Service implements ServiceInterface
                 /**
                  * Array definitions require a 'className' parameter
                  */
-                if typeof definition == "array" {
+                if typeof definition === "array" {
                     let builder = new Builder(),
                         instance = builder->build(
                             container,
@@ -208,7 +197,7 @@ class Service implements ServiceInterface
         /**
          * Update the shared instance if the service is shared
          */
-        if shared {
+        if this->shared {
             let this->sharedInstance = instance;
         }
 
@@ -227,23 +216,21 @@ class Service implements ServiceInterface
 
     /**
      * Changes a parameter in the definition without resolve the service
+     *
+     * @phpstan-param di_service_argument $parameter
      */
-    public function setParameter(int position, array! parameter) -> <ServiceInterface>
+    public function setParameter(int position,  array parameter) -> <ServiceInterface>
     {
-        var definition, arguments;
+        var arguments;
 
-        let definition = this->definition;
-
-        if unlikely typeof definition != "array" {
-            throw new Exception(
-                "Definition must be an array to update its parameters"
-            );
+        if unlikely typeof this->definition !== "array" {
+            throw new DefinitionMustBeArrayForUpdate();
         }
 
         /**
          * Update the parameter
          */
-        if fetch arguments, definition["arguments"] {
+        if fetch arguments, this->definition["arguments"] {
             let arguments[position] = parameter;
         } else {
             let arguments = [position: parameter];
@@ -252,12 +239,7 @@ class Service implements ServiceInterface
         /**
          * Re-update the arguments
          */
-        let definition["arguments"] = arguments;
-
-        /**
-         * Re-update the definition
-         */
-        let this->definition = definition;
+        let this->definition["arguments"] = arguments;
 
         return this;
     }

@@ -21,7 +21,9 @@
  * file that was distributed with this source code.
  */
 /**
- * Interface for Phalcon\Di
+ * Interface for Phalcon\Di\Di
+ *
+ * @extends ArrayAccess<string, mixed>
  */
 ZEPHIR_INIT_CLASS(Phalcon_Di_DiInterface)
 {
@@ -32,21 +34,30 @@ ZEPHIR_INIT_CLASS(Phalcon_Di_DiInterface)
 }
 
 /**
+ * Return the last DI created
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Di_DiInterface, getDefault);
+/**
+ * Resets the internal default DI
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Di_DiInterface, reset);
+/**
+ * Set a default dependency injection container to be obtained into static
+ * methods
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Di_DiInterface, setDefault);
+/**
  * Attempts to register a service in the services container
  * Only is successful if a service hasn't been registered previously
  * with the same name
  *
- * @param mixed definition
+ * @param mixed $definition
  */
 ZEPHIR_DOC_METHOD(Phalcon_Di_DiInterface, attempt);
 /**
  * Resolves the service based on its configuration
  */
 ZEPHIR_DOC_METHOD(Phalcon_Di_DiInterface, get);
-/**
- * Return the last DI created
- */
-ZEPHIR_DOC_METHOD(Phalcon_Di_DiInterface, getDefault);
 /**
  * Returns a service definition without resolving
  */
@@ -68,22 +79,31 @@ ZEPHIR_DOC_METHOD(Phalcon_Di_DiInterface, getShared);
  */
 ZEPHIR_DOC_METHOD(Phalcon_Di_DiInterface, has);
 /**
+ * Check whether the DI has a cached shared instance for a service name.
+ *
+ * Unlike `has()`, which reports on the service *definition* registry,
+ * this method reports only on the resolved-instance cache populated by
+ * `getShared()`. A service can be registered (`has()` returns true)
+ * without yet having a shared instance (`hasShared()` returns false).
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Di_DiInterface, hasShared);
+/**
  * Removes a service in the services container
  */
 ZEPHIR_DOC_METHOD(Phalcon_Di_DiInterface, remove);
 /**
- * Resets the internal default DI
+ * Removes the cached shared instance for a service, leaving the service
+ * definition intact so the next `getShared()` call rebuilds it.
+ *
+ * Useful in fork-based multi-process setups where a child inherits the
+ * parent's resource handle (e.g. a database connection) and needs to
+ * discard the cached instance without re-registering the service.
  */
-ZEPHIR_DOC_METHOD(Phalcon_Di_DiInterface, reset);
+ZEPHIR_DOC_METHOD(Phalcon_Di_DiInterface, removeShared);
 /**
  * Registers a service in the services container
  */
 ZEPHIR_DOC_METHOD(Phalcon_Di_DiInterface, set);
-/**
- * Set a default dependency injection container to be obtained into static
- * methods
- */
-ZEPHIR_DOC_METHOD(Phalcon_Di_DiInterface, setDefault);
 /**
  * Sets a service using a raw Phalcon\Di\Service definition
  */

@@ -4,35 +4,44 @@
  *
  * (c) Phalcon Team <team@phalcon.io>
  *
- * For the full copyright and license information, please view the
- * LICENSE.txt file that was distributed with this source code.
+ * For the full copyright and license information, please view the LICENSE.txt
+ * file that was distributed with this source code.
  */
 
 namespace Phalcon\Mvc\Model;
 
+use Phalcon\Contracts\Mvc\Model\Relation\CacheKeyProvider;
+use Phalcon\Contracts\Mvc\MvcTypes;
 use Phalcon\Db\Adapter\AdapterInterface;
 use Phalcon\Di\DiInterface;
 use Phalcon\Di\InjectionAwareInterface;
 use Phalcon\Events\EventsAwareInterface;
+use Phalcon\Events\Exception as EventsException;
 use Phalcon\Events\ManagerInterface as EventsManagerInterface;
-use Phalcon\Mvc\ModelInterface;
+use Phalcon\Mvc\Model\Exceptions\InvalidConnectionService;
+use Phalcon\Mvc\Model\Exceptions\ManagerOrmServicesUnavailable;
+use Phalcon\Mvc\Model\Exceptions\ModelCouldNotLoad;
+use Phalcon\Mvc\Model\Exceptions\ReferencedFieldsMismatch;
+use Phalcon\Mvc\Model\Exceptions\RelationAliasMustBeString;
+use Phalcon\Mvc\Model\Exceptions\UnknownRelationType;
 use Phalcon\Mvc\Model\Query\Builder;
 use Phalcon\Mvc\Model\Query\BuilderInterface;
 use Phalcon\Mvc\Model\Query\StatusInterface;
+use Phalcon\Mvc\ModelInterface;
+use Phalcon\Support\Settings;
 use ReflectionClass;
+use ReflectionException;
 use ReflectionProperty;
 
 /**
- * Phalcon\Mvc\Model\Manager
- *
  * This components controls the initialization of models, keeping record of
  * relations between the different models of the application.
  *
  * A ModelsManager is injected to a model via a Dependency Injector/Services
- * Container such as Phalcon\Di.
+ * Container such as Phalcon\Di\Di.
  *
  * ```php
- * use Phalcon\Di;
+ * use Phalcon\Di\Di;
  * use Phalcon\Mvc\Model\Manager as ModelsManager;
  *
  * $di = new Di();
@@ -44,126 +53,137 @@ use ReflectionProperty;
  *     }
  * );
  *
- * $robot = new Robots($di);
+ * $invoice = new Invoices($di);
  * ```
+ *
+ * @phpstan-import-type mvc_manager_relations from MvcTypes
+ * @phpstan-import-type mvc_model_bind_params from MvcTypes
+ * @phpstan-import-type mvc_model_bind_types from MvcTypes
+ * @phpstan-import-type mvc_model_parameters from MvcTypes
+ * @phpstan-import-type mvc_relation_options from MvcTypes
  */
 class Manager implements ManagerInterface, InjectionAwareInterface, EventsAwareInterface
 {
     /**
-     * @var array
+     * @phpstan-var array<string, RelationInterface>
      */
-    protected aliases = [];
+    protected array aliases = [];
 
     /**
      * Models' behaviors
      *
-     * @var array
+     * @phpstan-var array<string, array<int, BehaviorInterface>>
      */
-    protected behaviors = [];
+    protected array behaviors = [];
 
     /**
      * Belongs to relations
      *
-     * @var array
+     * @phpstan-var mvc_manager_relations
      */
-    protected belongsTo = [];
+    protected array belongsTo = [];
 
     /**
      * All the relationships by model
      *
-     * @var array
+     * @phpstan-var mvc_manager_relations
      */
-    protected belongsToSingle = [];
+    protected array belongsToSingle = [];
+
+    protected ?<BuilderInterface> builder = null;
+
+    protected ?<DiInterface> container = null;
 
     /**
-     * @var DiInterface|null
+     * @phpstan-var array<string, EventsManagerInterface>
      */
-    protected container = null;
+    protected array customEventsManager = [];
 
     /**
-     * @var array
+     * Write connection services that have been written to during the current
+     * request cycle. Used by the sticky mechanism to route reads to the write
+     * connection after a write.
+     *
+     * @phpstan-var array<string, bool>
      */
-    protected customEventsManager = [];
+    protected array dirtyWriteServices = [];
 
     /**
      * Does the model use dynamic update, instead of updating all rows?
      *
-     * @var array
+     * @phpstan-var array<string, bool>
      */
-    protected dynamicUpdate = [];
+    protected array dynamicUpdate = [];
 
-    /**
-     * @var EventsManagerInterface|null
-     */
-    protected eventsManager = null;
+    protected ?<EventsManagerInterface> eventsManager = null;
 
     /**
      * Has many relations
      *
-     * @var array
+     * @phpstan-var mvc_manager_relations
      */
-    protected hasMany = [];
+    protected array hasMany = [];
 
     /**
      * Has many relations by model
      *
-     * @var array
+     * @phpstan-var mvc_manager_relations
      */
-    protected hasManySingle = [];
+    protected array hasManySingle = [];
 
     /**
      * Has many-Through relations
      *
-     * @var array
+     * @phpstan-var mvc_manager_relations
      */
-    protected hasManyToMany = [];
+    protected array hasManyToMany = [];
 
     /**
      * Has many-Through relations by model
      *
-     * @var array
+     * @phpstan-var mvc_manager_relations
      */
-    protected hasManyToManySingle = [];
+    protected array hasManyToManySingle = [];
 
     /**
      * Has one relations
      *
-     * @var array
+     * @phpstan-var mvc_manager_relations
      */
-    protected hasOne = [];
+    protected array hasOne = [];
 
     /**
      * Has one relations by model
      *
-     * @var array
+     * @phpstan-var mvc_manager_relations
      */
-    protected hasOneSingle = [];
+    protected array hasOneSingle = [];
 
     /**
      * Has one through relations
      *
-     * @var array
+     * @phpstan-var mvc_manager_relations
      */
-    protected hasOneThrough = [];
+    protected array hasOneThrough = [];
 
     /**
      * Has one through relations by model
      *
-     * @var array
+     * @phpstan-var mvc_manager_relations
      */
-    protected hasOneThroughSingle = [];
+    protected array hasOneThroughSingle = [];
 
     /**
      * Mark initialized models
      *
-     * @var array
+     * @phpstan-var array<string, bool>
      */
-    protected initialized = [];
+    protected array initialized = [];
 
     /**
-     * @var array
+     * @phpstan-var array<string, bool>
      */
-    protected keepSnapshots = [];
+    protected array keepSnapshots = [];
 
     /**
      * Last model initialized
@@ -180,1233 +200,74 @@ class Manager implements ManagerInterface, InjectionAwareInterface, EventsAwareI
     protected lastQuery = null;
 
     /**
-     * @var array
+     * @phpstan-var array<string, array<string, bool>>
      */
-    protected modelVisibility = [];
+    protected array modelVisibility = [];
+
+    protected string prefix = "";
 
     /**
-     * @var string
+     * @phpstan-var array<string, string>
      */
-    protected prefix = "";
-
-    /**
-     * @var array
-     */
-    protected readConnectionServices = [];
-
-    /**
-     * @var array
-     */
-    protected sources = [];
-
-    /**
-     * @var array
-     */
-    protected schemas = [];
-
-    /**
-     * @var array
-     */
-    protected writeConnectionServices = [];
+    protected array readConnectionServices = [];
 
     /**
      * Stores a list of reusable instances
      *
-     * @var array
+     * @phpstan-var array<string, mixed>
      */
-    protected reusable = [];
+    protected array reusable = [];
 
     /**
-     * Sets the DependencyInjector container
+     * @phpstan-var array<string, string>
      */
-    public function setDI(<DiInterface> container) -> void
-    {
-        let this->container = container;
-    }
+    protected array schemas = [];
 
     /**
-     * Returns the DependencyInjector container
+     * @phpstan-var array<string, string>
      */
-    public function getDI() -> <DiInterface>
-    {
-        return this->container;
-    }
+    protected array sources = [];
 
     /**
-     * Sets a global events manager
+     * Whether reads should stick to the write connection after a write has
+     * occurred during the current request cycle.
      */
-    public function setEventsManager(<EventsManagerInterface> eventsManager) -> void
-    {
-        let this->eventsManager = eventsManager;
-    }
+    protected bool sticky = false;
 
     /**
-     * Returns the internal event manager
+     * @phpstan-var array<string, string>
      */
-    public function getEventsManager() -> <EventsManagerInterface> | null
-    {
-        return this->eventsManager;
-    }
+    protected array writeConnectionServices = [];
 
     /**
-     * Sets a custom events manager for a specific model
+     * Destroys the current PHQL cache
      */
-    public function setCustomEventsManager(<ModelInterface> model, <EventsManagerInterface> eventsManager) -> void
+    public function __destruct()
     {
-        let this->customEventsManager[get_class_lower(model)] = eventsManager;
-    }
+        phalcon_orm_destroy_cache();
 
-    /**
-     * Returns a custom events manager related to a model or null if there is no related events manager
-     */
-    public function getCustomEventsManager(<ModelInterface> model) -> <EventsManagerInterface> | null
-    {
-        var eventsManager;
-
-        if fetch eventsManager, this->customEventsManager[get_class_lower(model)] {
-            return eventsManager;
-        }
-
-        return null;
-    }
-
-    /**
-     * Initializes a model in the model manager
-     */
-    public function initialize(<ModelInterface> model) -> bool
-    {
-        var className, eventsManager;
-
-        let className = get_class_lower(model);
-
-        /**
-         * Models are just initialized once per request
-         */
-        if isset this->initialized[className] {
-            return false;
-        }
-
-        /**
-         * Update the model as initialized, this avoid cyclic initializations
-         */
-        let this->initialized[className] = true;
-
-        /**
-         * Call the 'initialize' method if it's implemented
-         */
-        if method_exists(model, "initialize") {
-            model->{"initialize"}();
-        }
-
-        /**
-         * Update the last initialized model, so it can be used in
-         * modelsManager:afterInitialize
-         */
-        let this->lastInitialized = model;
-
-        /**
-         * If an EventsManager is available we pass to it every initialized
-         * model
-         */
-        let eventsManager = <EventsManagerInterface> this->eventsManager;
-
-        if typeof eventsManager == "object" {
-            eventsManager->fire("modelsManager:afterInitialize", this, model);
-        }
-
-        return true;
-    }
-
-    /**
-     * Check whether a model is already initialized
-     */
-    public function isInitialized(string! className) -> bool
-    {
-        return isset this->initialized[strtolower(className)];
-    }
-
-    /**
-     * Get last initialized model
-     */
-    public function getLastInitialized() -> <ModelInterface>
-    {
-        return this->lastInitialized;
-    }
-
-    /**
-     * Loads a model throwing an exception if it doesn't exist
-     */
-    public function load(string! modelName) -> <ModelInterface>
-    {
-        var model;
-
-        /**
-         * The model doesn't exist throw an exception
-         */
-        if unlikely !class_exists(modelName) {
-            throw new Exception(
-                "Model '" . modelName . "' could not be loaded"
-            );
-        }
-
-        /**
-         * Load it using an autoloader
-         */
-        let model = create_instance_params(
-            modelName,
-            [
-                null,
-                this->container,
-                this
-            ]
-        );
-
-        return model;
-    }
-
-    /**
-     * Sets the prefix for all model sources.
-     *
-     * ```php
-     * use Phalcon\Mvc\Model\Manager;
-     *
-     * $di->set(
-     *     "modelsManager",
-     *     function () {
-     *         $modelsManager = new Manager();
-     *
-     *         $modelsManager->setModelPrefix("wp_");
-     *
-     *         return $modelsManager;
-     *     }
-     * );
-     *
-     * $robots = new Robots();
-     *
-     * echo $robots->getSource(); // wp_robots
-     * ```
-     */
-    public function setModelPrefix(string! prefix) -> void
-    {
-        let this->prefix = prefix;
-    }
-
-    /**
-     * Returns the prefix for all model sources.
-     */
-    public function getModelPrefix() -> string
-    {
-        return this->prefix;
-    }
-
-    /**
-     * Sets the mapped source for a model
-     */
-    public function setModelSource(<ModelInterface> model, string! source) -> void
-    {
-        let this->sources[get_class_lower(model)] = source;
-    }
-
-    /**
-     * Check whether a model property is declared as public.
-     *
-     * ```php
-     * $isPublic = $manager->isVisibleModelProperty(
-     *     new Robots(),
-     *     "name"
-     * );
-     * ```
-     */
-    final public function isVisibleModelProperty(<ModelInterface> model, string property) -> bool
-    {
-        var properties, className, publicProperties, classReflection,
-            reflectionProperties, reflectionProperty;
-
-        let className = get_class(model);
-
-        if !isset this->modelVisibility[className] {
-            let publicProperties = [];
-            let classReflection = new ReflectionClass(className);
-            let reflectionProperties = classReflection->getProperties(ReflectionProperty::IS_PUBLIC);
-            for reflectionProperty in reflectionProperties {
-                let publicProperties[reflectionProperty->name] = true;
-            }
-            let this->modelVisibility[className] = publicProperties;
-        }
-
-        let properties = this->modelVisibility[className];
-
-        return array_key_exists(property, properties);
-    }
-
-    /**
-     * Returns the mapped source for a model
-     */
-    public function getModelSource(<ModelInterface> model) -> string
-    {
-        var entityName;
-
-        let entityName = get_class_lower(model);
-
-        if !isset this->sources[entityName] {
-            this->setModelSource(
-                model,
-                uncamelize(
-                    get_class_ns(model)
-                )
-            );
-        }
-
-        return this->prefix . this->sources[entityName];
-    }
-
-    /**
-     * Sets the mapped schema for a model
-     */
-    public function setModelSchema(<ModelInterface> model, string! schema) -> void
-    {
-        let this->schemas[get_class_lower(model)] = schema;
-    }
-
-    /**
-     * Returns the mapped schema for a model
-     */
-    public function getModelSchema(<ModelInterface> model) -> string | null
-    {
-        var schema;
-
-        if !fetch schema, this->schemas[get_class_lower(model)] {
-            return null;
-        }
-
-        return schema;
-    }
-
-    /**
-     * Sets both write and read connection service for a model
-     */
-    public function setConnectionService(<ModelInterface> model, string! connectionService) -> void
-    {
-        this->setReadConnectionService(model, connectionService);
-        this->setWriteConnectionService(model, connectionService);
-    }
-
-    /**
-     * Sets write connection service for a model
-     */
-    public function setWriteConnectionService(<ModelInterface> model, string! connectionService) -> void
-    {
-        let this->writeConnectionServices[get_class_lower(model)] = connectionService;
-    }
-
-    /**
-     * Sets read connection service for a model
-     */
-    public function setReadConnectionService(<ModelInterface> model, string! connectionService) -> void
-    {
-        let this->readConnectionServices[get_class_lower(model)] = connectionService;
-    }
-
-    /**
-     * Returns the connection to read data related to a model
-     */
-    public function getReadConnection(<ModelInterface> model) -> <AdapterInterface>
-    {
-        return this->getConnection(model, this->readConnectionServices);
-    }
-
-    /**
-     * Returns the connection to write data related to a model
-     */
-    public function getWriteConnection(<ModelInterface> model) -> <AdapterInterface>
-    {
-        return this->getConnection(model, this->writeConnectionServices);
-    }
-
-    /**
-     * Returns the connection to read or write data related to a model depending on the connection services.
-     *
-     * @return AdapterInterface
-     */
-    protected function getConnection(<ModelInterface> model, connectionServices) -> <AdapterInterface>
-    {
-        var container, service, connection;
-
-        let service = this->getConnectionService(model, connectionServices);
-
-        let container = <DiInterface> this->container;
-
-        if unlikely typeof container != "object" {
-            throw new Exception(
-                Exception::containerServiceNotFound(
-                    "the services related to the ORM"
-                )
-            );
-        }
-
-        /**
-         * Request the connection service from the DI
-         */
-        let connection = <AdapterInterface> container->getShared(service);
-
-        if unlikely typeof connection != "object" {
-            throw new Exception("Invalid injected connection service");
-        }
-
-        return connection;
-    }
-
-    /**
-     * Returns the connection service name used to read data related to a model
-     */
-    public function getReadConnectionService(<ModelInterface> model) -> string
-    {
-        return this->getConnectionService(
-            model,
-            this->readConnectionServices
-        );
-    }
-
-    /**
-     * Returns the connection service name used to write data related to a model
-     */
-    public function getWriteConnectionService(<ModelInterface> model) -> string
-    {
-        return this->getConnectionService(
-            model,
-            this->writeConnectionServices
-        );
-    }
-
-    /**
-     * Returns the connection service name used to read or write data related to
-     * a model depending on the connection services
-     *
-     * @return string
-     */
-    public function getConnectionService(<ModelInterface> model, connectionServices) -> string
-    {
-        var connection;
-
-        if !fetch connection, connectionServices[get_class_lower(model)] {
-            return "db";
-        }
-
-        return connection;
-    }
-
-    /**
-     * Receives events generated in the models and dispatches them to an
-     * events-manager if available. Notify the behaviors that are listening in
-     * the model
-     */
-    public function notifyEvent(string! eventName, <ModelInterface> model)
-    {
-        var status, behavior, modelsBehaviors, eventsManager,
-            customEventsManager;
-
-        let status = null;
-
-        /**
-         * Dispatch events to the global events manager
-         */
-        if fetch modelsBehaviors, this->behaviors[get_class_lower(model)] {
-            /**
-             * Notify all the events on the behavior
-             */
-            for behavior in modelsBehaviors {
-                let status = behavior->notify(eventName, model);
-
-                if status === false {
-                    return false;
-                }
-            }
-        }
-
-        /**
-         * Dispatch events to the global events manager
-         */
-        let eventsManager = this->eventsManager;
-
-        if typeof eventsManager == "object" {
-            let status = eventsManager->fire(
-                "model:" . eventName,
-                model
-            );
-
-            if status === false {
-                return status;
-            }
-        }
-
-        /**
-         * A model can has a specific events manager for it
-         */
-        if fetch customEventsManager, this->customEventsManager[get_class_lower(model)] {
-            let status = customEventsManager->fire(
-                "model:" . eventName,
-                model
-            );
-
-            if status === false {
-                return false;
-            }
-        }
-
-        return status;
-    }
-
-    /**
-     * Dispatch an event to the listeners and behaviors
-     * This method expects that the endpoint listeners/behaviors returns true
-     * meaning that a least one was implemented
-     */
-    public function missingMethod(<ModelInterface> model, string! eventName, var data)
-    {
-        var modelsBehaviors, result, eventsManager, behavior;
-
-        /**
-         * Dispatch events to the global events manager
-         */
-        if fetch modelsBehaviors, this->behaviors[get_class_lower(model)] {
-            /**
-             * Notify all the events on the behavior
-             */
-            for behavior in modelsBehaviors {
-                let result = behavior->missingMethod(model, eventName, data);
-
-                if result !== null {
-                    return result;
-                }
-            }
-        }
-
-        /**
-         * Dispatch events to the global events manager
-         */
-        let eventsManager = this->eventsManager;
-
-        if typeof eventsManager == "object" {
-            return eventsManager->fire(
-                "model:" . eventName,
-                model,
-                data
-            );
-        }
-
-        return null;
-    }
-
-    /**
-     * Binds a behavior to a model
-     */
-    public function addBehavior(<ModelInterface> model, <BehaviorInterface> behavior) -> void
-    {
-        var entityName;
-
-        let entityName = get_class_lower(model);
-
-        if !isset this->behaviors[entityName] {
-            let this->behaviors[entityName] = [];
-        }
-
-        /**
-         * Append the behavior to the list of behaviors
-         */
-        let this->behaviors[entityName][] = behavior;
-    }
-
-    /**
-     * Sets if a model must keep snapshots
-     */
-    public function keepSnapshots(<ModelInterface> model, bool keepSnapshots) -> void
-    {
-        let this->keepSnapshots[get_class_lower(model)] = keepSnapshots;
-    }
-
-    /**
-     * Checks if a model is keeping snapshots for the queried records
-     */
-    public function isKeepingSnapshots(<ModelInterface> model) -> bool
-    {
-        var isKeeping;
-
-        if !fetch isKeeping, this->keepSnapshots[get_class_lower(model)] {
-            return false;
-        }
-
-        return isKeeping;
-    }
-
-    /**
-     * Sets if a model must use dynamic update instead of the all-field update
-     */
-    public function useDynamicUpdate(<ModelInterface> model, bool dynamicUpdate) -> void
-    {
-        var entityName;
-
-        let entityName = get_class_lower(model),
-            this->dynamicUpdate[entityName] = dynamicUpdate,
-            this->keepSnapshots[entityName] = dynamicUpdate;
-    }
-
-    /**
-     * Checks if a model is using dynamic update instead of all-field update
-     */
-    public function isUsingDynamicUpdate(<ModelInterface> model) -> bool
-    {
-        var isUsing;
-
-        if !fetch isUsing, this->dynamicUpdate[get_class_lower(model)] {
-            return false;
-        }
-
-        return isUsing;
-    }
-
-    /**
-     * Setup a 1-1 relation between two models
-     *
-     * @param array options
-     */
-    public function addHasOne(<ModelInterface> model, var fields, string! referencedModel,
-        var referencedFields, var options = null) -> <RelationInterface>
-    {
-        var entityName, referencedEntity, relation, relations, alias,
-            lowerAlias, singleRelations;
-        string keyRelation;
-
-        let entityName = get_class_lower(model),
-            referencedEntity = strtolower(referencedModel);
-
-        let keyRelation = entityName . "$" . referencedEntity;
-
-        if !fetch relations, this->hasOne[keyRelation] {
-            let relations = [];
-        }
-
-        /**
-         * Check if the number of fields are the same
-         */
-        if typeof referencedFields == "array" {
-            if unlikely count(fields) != count(referencedFields) {
-                throw new Exception(
-                    "Number of referenced fields are not the same"
-                );
-            }
-        }
-
-        /**
-         * Create a relationship instance
-         */
-        let relation = new Relation(
-            Relation::HAS_ONE,
-            referencedModel,
-            fields,
-            referencedFields,
-            options
-        );
-
-        /**
-         * Check an alias for the relation
-         */
-        if fetch alias, options["alias"] {
-            if unlikely typeof alias != "string" {
-                throw new Exception("Relation alias must be a string");
-            }
-
-            let lowerAlias = strtolower(alias);
-        } else {
-            let lowerAlias = referencedEntity;
-        }
-
-        /**
-         * Append a new relationship
-         * Update the global alias
-         * Update the relations
-         */
-        let relations[] = relation,
-            this->aliases[entityName . "$" . lowerAlias] = relation,
-            this->hasOne[keyRelation] = relations;
-
-        /**
-         * Get existing relations by model
-         */
-        if !fetch singleRelations, this->hasOneSingle[entityName] {
-            let singleRelations = [];
-        }
-
-        /**
-         * Append a new relationship
-         */
-        let singleRelations[] = relation;
-
-        /**
-         * Update relations by model
-         */
-        let this->hasOneSingle[entityName] = singleRelations;
-
-        return relation;
-    }
-
-    /**
-     * Setups a relation 1-1 between two models using an intermediate model
-     *
-     * @param    string fields
-     * @param    string intermediateFields
-     * @param    string intermediateReferencedFields
-     * @param    string referencedFields
-     * @param   array options
-     */
-    public function addHasOneThrough(<ModelInterface> model, var fields, string! intermediateModel,
-        var intermediateFields, var intermediateReferencedFields, string! referencedModel, var referencedFields, var options = null) -> <RelationInterface>
-    {
-        var entityName, referencedEntity, hasOneThrough, relation, relations,
-            alias, lowerAlias, singleRelations, intermediateEntity;
-        string keyRelation;
-
-        let entityName = get_class_lower(model),
-            intermediateEntity = strtolower(intermediateModel),
-            referencedEntity = strtolower(referencedModel),
-            keyRelation = entityName . "$" . referencedEntity;
-
-        let hasOneThrough = this->hasOneThrough;
-
-        if !fetch relations, hasOneThrough[keyRelation] {
-            let relations = [];
-        }
-
-        /**
-         * Check if the number of fields are the same from the model to the
-         * intermediate model
-         */
-        if typeof intermediateFields == "array" {
-            if unlikely count(fields) != count(intermediateFields) {
-                throw new Exception(
-                    "Number of referenced fields are not the same"
-                );
-            }
-        }
-
-        /**
-         * Check if the number of fields are the same from the intermediate
-         * model to the referenced model
-         */
-        if typeof intermediateReferencedFields == "array" {
-            if unlikely count(fields) != count(intermediateFields) {
-                throw new Exception(
-                    "Number of referenced fields are not the same"
-                );
-            }
-        }
-
-        /**
-         * Create a relationship instance
-         */
-        let relation = new Relation(
-            Relation::HAS_ONE_THROUGH,
-            referencedModel,
-            fields,
-            referencedFields,
-            options
-        );
-
-        /**
-         * Set extended intermediate relation data
-         */
-        relation->setIntermediateRelation(
-            intermediateFields,
-            intermediateModel,
-            intermediateReferencedFields
-        );
-
-        /**
-         * Check an alias for the relation
-         */
-        if fetch alias, options["alias"] {
-            if typeof alias != "string" {
-                throw new Exception("Relation alias must be a string");
-            }
-
-            let lowerAlias = strtolower(alias);
-        } else {
-            let lowerAlias = referencedEntity;
-        }
-
-        /**
-         * Append a new relationship
-         */
-        let relations[] = relation;
-
-        /**
-         * Update the global alias
-         */
-        let this->aliases[entityName . "$" . lowerAlias] = relation;
-
-        /**
-         * Update the relations
-         */
-        let this->hasOneThrough[keyRelation] = relations;
-
-        /**
-         * Get existing relations by model
-         */
-        if !fetch singleRelations, this->hasOneThroughSingle[entityName] {
-            let singleRelations = [];
-        }
-
-        /**
-         * Append a new relationship
-         */
-        let singleRelations[] = relation;
-
-        /**
-         * Update relations by model
-         */
-        let this->hasOneThroughSingle[entityName] = singleRelations;
-
-        return relation;
-    }
-
-    /**
-     * Setup a relation reverse many to one between two models
-     *
-     * @param    array options
-     */
-    public function addBelongsTo(<ModelInterface> model, var fields, string! referencedModel,
-        var referencedFields, var options = null) -> <RelationInterface>
-    {
-        var entityName, referencedEntity, relation, relations, alias,
-            lowerAlias, singleRelations;
-        string keyRelation;
-
-        let entityName = get_class_lower(model),
-            referencedEntity = strtolower(referencedModel);
-
-        let keyRelation = entityName . "$" . referencedEntity;
-
-        if !fetch relations, this->belongsTo[keyRelation] {
-            let relations = [];
-        }
-
-        /**
-         * Check if the number of fields are the same
-         */
-        if typeof referencedFields == "array" {
-            if unlikely count(fields) != count(referencedFields) {
-                throw new Exception(
-                    "Number of referenced fields are not the same"
-                );
-            }
-        }
-
-        /**
-         * Create a relationship instance
-         */
-        let relation = new Relation(
-            Relation::BELONGS_TO,
-            referencedModel,
-            fields,
-            referencedFields,
-            options
-        );
-
-        /**
-         * Check an alias for the relation
-         */
-        if fetch alias, options["alias"] {
-            if unlikely typeof alias != "string" {
-                throw new Exception("Relation alias must be a string");
-            }
-
-            let lowerAlias = strtolower(alias);
-        } else {
-            let lowerAlias = referencedEntity;
-        }
-
-        /**
-         * Append a new relationship
-         * Update the global alias
-         * Update the relations
-         */
-        let relations[] = relation,
-            this->aliases[entityName . "$" . lowerAlias] = relation,
-            this->belongsTo[keyRelation] = relations;
-
-        /**
-         * Get existing relations by model
-         */
-        if !fetch singleRelations, this->belongsToSingle[entityName] {
-            let singleRelations = [];
-        }
-
-        /**
-         * Append a new relationship
-         */
-        let singleRelations[] = relation;
-
-        /**
-         * Update relations by model
-         */
-        let this->belongsToSingle[entityName] = singleRelations;
-
-        return relation;
-    }
-
-    /**
-     * Setup a relation 1-n between two models
-     *
-     * @param    mixed referencedFields
-     * @param    array options
-     */
-    public function addHasMany(<ModelInterface> model, var fields, string! referencedModel,
-        var referencedFields, var options = null) -> <RelationInterface>
-    {
-        var entityName, referencedEntity, hasMany, relation, relations, alias,
-            lowerAlias, singleRelations;
-        string keyRelation;
-
-        let entityName = get_class_lower(model),
-            referencedEntity = strtolower(referencedModel),
-            keyRelation = entityName . "$" . referencedEntity;
-
-        let hasMany = this->hasMany;
-
-        if !fetch relations, hasMany[keyRelation] {
-            let relations = [];
-        }
-
-        /**
-         * Check if the number of fields are the same
-         */
-        if typeof referencedFields == "array" {
-            if unlikely count(fields) != count(referencedFields) {
-                throw new Exception(
-                    "Number of referenced fields are not the same"
-                );
-            }
-        }
-
-        /**
-         * Create a relationship instance
-         */
-        let relation = new Relation(
-            Relation::HAS_MANY,
-            referencedModel,
-            fields,
-            referencedFields,
-            options
-        );
-
-        /**
-         * Check an alias for the relation
-         */
-        if fetch alias, options["alias"] {
-            if unlikely typeof alias != "string" {
-                throw new Exception("Relation alias must be a string");
-            }
-
-            let lowerAlias = strtolower(alias);
-        } else {
-            let lowerAlias = referencedEntity;
-        }
-
-        /**
-         * Append a new relationship
-         * Update the global alias
-         * Update the relations
-         */
-        let relations[] = relation,
-            this->aliases[entityName . "$" . lowerAlias] = relation,
-            this->hasMany[keyRelation] = relations;
-
-        /**
-         * Get existing relations by model
-         */
-        if !fetch singleRelations, this->hasManySingle[entityName] {
-            let singleRelations = [];
-        }
-
-        /**
-         * Append a new relationship
-         */
-        let singleRelations[] = relation;
-
-        /**
-         * Update relations by model
-         */
-        let this->hasManySingle[entityName] = singleRelations;
-
-        return relation;
-    }
-
-    /**
-     * Setups a relation n-m between two models
-     *
-     * @param    string fields
-     * @param    string intermediateFields
-     * @param    string intermediateReferencedFields
-     * @param    string referencedFields
-     * @param   array options
-     */
-    public function addHasManyToMany(<ModelInterface> model, var fields, string! intermediateModel,
-        var intermediateFields, var intermediateReferencedFields, string! referencedModel, var referencedFields, var options = null) -> <RelationInterface>
-    {
-        var entityName, referencedEntity, hasManyToMany, relation, relations,
-            alias, lowerAlias, singleRelations, intermediateEntity;
-        string keyRelation;
-
-        let entityName = get_class_lower(model),
-            intermediateEntity = strtolower(intermediateModel),
-            referencedEntity = strtolower(referencedModel),
-            keyRelation = entityName . "$" . referencedEntity;
-
-        let hasManyToMany = this->hasManyToMany;
-
-        if !fetch relations, hasManyToMany[keyRelation] {
-            let relations = [];
-        }
-
-        /**
-         * Check if the number of fields are the same from the model to the
-         * intermediate model
-         */
-        if typeof intermediateFields == "array" {
-            if unlikely count(fields) != count(intermediateFields) {
-                throw new Exception(
-                    "Number of referenced fields are not the same"
-                );
-            }
-        }
-
-        /**
-         * Check if the number of fields are the same from the intermediate
-         * model to the referenced model
-         */
-        if typeof intermediateReferencedFields == "array" {
-            if unlikely count(fields) != count(intermediateFields) {
-                throw new Exception(
-                    "Number of referenced fields are not the same"
-                );
-            }
-        }
-
-        /**
-         * Create a relationship instance
-         */
-        let relation = new Relation(
-            Relation::HAS_MANY_THROUGH,
-            referencedModel,
-            fields,
-            referencedFields,
-            options
-        );
-
-        /**
-         * Set extended intermediate relation data
-         */
-        relation->setIntermediateRelation(
-            intermediateFields,
-            intermediateModel,
-            intermediateReferencedFields
-        );
-
-        /**
-         * Check an alias for the relation
-         */
-        if fetch alias, options["alias"] {
-            if typeof alias != "string" {
-                throw new Exception("Relation alias must be a string");
-            }
-
-            let lowerAlias = strtolower(alias);
-        } else {
-            let lowerAlias = referencedEntity;
-        }
-
-        /**
-         * Append a new relationship
-         */
-        let relations[] = relation;
-
-        /**
-         * Update the global alias
-         */
-        let this->aliases[entityName . "$" . lowerAlias] = relation;
-
-        /**
-         * Update the relations
-         */
-        let this->hasManyToMany[keyRelation] = relations;
-
-        /**
-         * Get existing relations by model
-         */
-        if !fetch singleRelations, this->hasManyToManySingle[entityName] {
-            let singleRelations = [];
-        }
-
-        /**
-         * Append a new relationship
-         */
-        let singleRelations[] = relation;
-
-        /**
-         * Update relations by model
-         */
-        let this->hasManyToManySingle[entityName] = singleRelations;
-
-        return relation;
-    }
-
-    /**
-     * Checks whether a model has a belongsTo relation with another model
-     */
-    public function existsBelongsTo(string! modelName, string! modelRelation) -> bool
-    {
-        var entityName;
-        string keyRelation;
-
-        let entityName = strtolower(modelName);
-
-        /**
-         * Relationship unique key
-         */
-        let keyRelation = entityName . "$" . strtolower(modelRelation);
-
-        /**
-         * Initialize the model first
-         */
-        if !isset this->initialized[entityName] {
-            this->load(modelName);
-        }
-
-        return isset this->belongsTo[keyRelation];
-    }
-
-    /**
-     * Checks whether a model has a hasMany relation with another model
-     */
-    public function existsHasMany(string! modelName, string! modelRelation) -> bool
-    {
-        var entityName;
-        string keyRelation;
-
-        let entityName = strtolower(modelName);
-
-        /**
-         * Relationship unique key
-         */
-        let keyRelation = entityName . "$" . strtolower(modelRelation);
-
-        /**
-         * Initialize the model first
-         */
-        if !isset this->initialized[entityName] {
-            this->load(modelName);
-        }
-
-        return isset this->hasMany[keyRelation];
-    }
-
-    /**
-     * Checks whether a model has a hasOne relation with another model
-     */
-    public function existsHasOne(string! modelName, string! modelRelation) -> bool
-    {
-        var entityName;
-        string keyRelation;
-
-        let entityName = strtolower(modelName);
-
-        /**
-         * Relationship unique key
-         */
-        let keyRelation = entityName . "$" . strtolower(modelRelation);
-
-        /**
-         * Initialize the model first
-         */
-        if !isset this->initialized[entityName] {
-            this->load(modelName);
-        }
-
-        return isset this->hasOne[keyRelation];
-    }
-
-    /**
-     * Checks whether a model has a hasOneThrough relation with another model
-     */
-    public function existsHasOneThrough(string! modelName, string! modelRelation) -> bool
-    {
-        var entityName;
-        string keyRelation;
-
-        let entityName = strtolower(modelName);
-
-        /**
-         * Relationship unique key
-         */
-        let keyRelation = entityName . "$" . strtolower(modelRelation);
-
-        /**
-         * Initialize the model first
-         */
-        if !isset this->initialized[entityName] {
-            this->load(modelName);
-        }
-
-        return isset this->hasOneThrough[keyRelation];
-    }
-
-    /**
-     * Checks whether a model has a hasManyToMany relation with another model
-     */
-    public function existsHasManyToMany(string! modelName, string! modelRelation) -> bool
-    {
-        var entityName;
-        string keyRelation;
-
-        let entityName = strtolower(modelName);
-
-        /**
-         * Relationship unique key
-         */
-        let keyRelation = entityName . "$" . strtolower(modelRelation);
-
-        /**
-         * Initialize the model first
-         */
-        if !isset this->initialized[entityName] {
-            this->load(modelName);
-        }
-
-        return isset this->hasManyToMany[keyRelation];
-    }
-
-    /**
-     * Returns a relation by its alias
-     *
-     * @param string modelName
-     * @param string alias
-     *
-     * @return RelationInterface|bool
-     */
-    public function getRelationByAlias(string! modelName, string! alias) -> <RelationInterface> | bool
-    {
-        var relation;
-
-        if !fetch relation, this->aliases[strtolower(modelName . "$" . alias)] {
-            return false;
-        }
-
-        return relation;
+        Query::clean();
     }
 
     /**
      * Merge two arrays of find parameters
+     *
+     * The order matters. Conditions coming from key 0 or "conditions" are
+     * ANDed in argument order; `bind` and `bindTypes` are merged for the
+     * second argument only and assigned outright for the first. Pass the
+     * parameters whose bindings must survive as the second argument.
+     *
+     * Static because it reads nothing but its arguments, and public so bulk
+     * loaders can reuse the merge instead of duplicating these semantics.
+     *
+     * @param mixed $findParamsOne
+     * @param mixed $findParamsTwo
+     *
+     * @return array
+     *
+     * @phpstan-return mvc_model_parameters
      */
-    final protected function _mergeFindParameters(var findParamsOne, var findParamsTwo) -> array
+    final public static function mergeFindParameters(var findParamsOne, var findParamsTwo) -> array
     {
         var key, value;
         array findParams;
@@ -1468,19 +329,1120 @@ class Manager implements ManagerInterface, InjectionAwareInterface, EventsAwareI
     }
 
     /**
+     * Binds a behavior to a model
+     */
+    public function addBehavior(
+        <ModelInterface> model,
+        <BehaviorInterface> behavior
+    ) -> void {
+        var entityName;
+
+        let entityName = get_class_lower(model);
+
+        if !isset this->behaviors[entityName] {
+            let this->behaviors[entityName] = [];
+        }
+
+        /**
+         * Append the behavior to the list of behaviors
+         */
+        let this->behaviors[entityName][] = behavior;
+    }
+
+    /**
+     * Setup a relation reverse many to one between two models
+     *
+     * @param ModelInterface $model
+     * @param mixed          $fields
+     * @param string         $referencedModel
+     * @param mixed          $referencedFields
+     * @param array          $options
+     *
+     * @return RelationInterface
+     *
+     * @phpstan-param mvc_relation_options $options
+     */
+    public function addBelongsTo(
+        <ModelInterface> model,
+        var fields,
+         string referencedModel,
+        var referencedFields,
+        array options = []
+    ) -> <RelationInterface> {
+        var entityName, referencedEntity, relation, relations, alias,
+            lowerAlias, singleRelations;
+        string keyRelation;
+
+        let entityName = get_class_lower(model),
+            referencedEntity = strtolower(referencedModel);
+
+        let keyRelation = entityName . "$" . referencedEntity;
+
+        if !fetch relations, this->belongsTo[keyRelation] {
+            let relations = [];
+        }
+
+        /**
+         * Check if the number of fields are the same
+         */
+        if unlikely typeof referencedFields == "array" {
+            if unlikely this->getFieldsCount(fields) != this->getFieldsCount(referencedFields) {
+                throw new ReferencedFieldsMismatch("BelongsTo", entityName, referencedEntity);
+            }
+        }
+
+        /**
+         * Create a relationship instance
+         */
+        let relation = new Relation(
+            Relation::BELONGS_TO,
+            referencedModel,
+            fields,
+            referencedFields,
+            options
+        );
+
+        /**
+         * Check an alias for the relation
+         */
+        if fetch alias, options["alias"] {
+            if unlikely typeof alias != "string" {
+                throw new RelationAliasMustBeString("BelongsTo", entityName, referencedEntity);
+            }
+
+            let lowerAlias = strtolower(alias);
+        } else {
+            let lowerAlias = referencedEntity;
+        }
+
+        /**
+         * Append a new relationship
+         * Update the global alias
+         * Update the relations
+         */
+        let relations[] = relation,
+            this->aliases[entityName . "$" . lowerAlias] = relation,
+            this->belongsTo[keyRelation] = relations;
+
+        /**
+         * Get existing relations by model
+         */
+        if !fetch singleRelations, this->belongsToSingle[entityName] {
+            let singleRelations = [];
+        }
+
+        /**
+         * Append a new relationship
+         */
+        let singleRelations[] = relation;
+
+        /**
+         * Update relations by model
+         */
+        let this->belongsToSingle[entityName] = singleRelations;
+
+        return relation;
+    }
+
+    /**
+     * Setup a relation 1-n between two models
+     *
+     * @param ModelInterface $model
+     * @param mixed          $fields
+     * @param string         $referencedModel
+     * @param mixed          $referencedFields
+     * @param array          $options
+     *
+     * @return RelationInterface
+     *
+     * @phpstan-param mvc_relation_options $options
+     */
+    public function addHasMany(
+        <ModelInterface> model,
+        var fields,
+         string referencedModel,
+        var referencedFields,
+        array options = []
+    ) -> <RelationInterface> {
+        var entityName, referencedEntity, hasMany, relation, relations, alias,
+            lowerAlias, singleRelations;
+        string keyRelation;
+
+        let entityName = get_class_lower(model),
+            referencedEntity = strtolower(referencedModel),
+            keyRelation = entityName . "$" . referencedEntity;
+
+        let hasMany = this->hasMany;
+
+        if !fetch relations, hasMany[keyRelation] {
+            let relations = [];
+        }
+
+        /**
+         * Check if the number of fields are the same
+         */
+        if typeof referencedFields == "array" {
+            if unlikely this->getFieldsCount(fields) != this->getFieldsCount(referencedFields) {
+                throw new ReferencedFieldsMismatch("HasMany", entityName, referencedEntity);
+            }
+        }
+
+        /**
+         * Create a relationship instance
+         */
+        let relation = new Relation(
+            Relation::HAS_MANY,
+            referencedModel,
+            fields,
+            referencedFields,
+            options
+        );
+
+        /**
+         * Check an alias for the relation
+         */
+        if fetch alias, options["alias"] {
+            if unlikely typeof alias != "string" {
+                throw new RelationAliasMustBeString("HasMany", entityName, referencedEntity);
+            }
+
+            let lowerAlias = strtolower(alias);
+        } else {
+            let lowerAlias = referencedEntity;
+        }
+
+        /**
+         * Append a new relationship
+         * Update the global alias
+         * Update the relations
+         */
+        let relations[] = relation,
+            this->aliases[entityName . "$" . lowerAlias] = relation,
+            this->hasMany[keyRelation] = relations;
+
+        /**
+         * Get existing relations by model
+         */
+        if !fetch singleRelations, this->hasManySingle[entityName] {
+            let singleRelations = [];
+        }
+
+        /**
+         * Append a new relationship
+         */
+        let singleRelations[] = relation;
+
+        /**
+         * Update relations by model
+         */
+        let this->hasManySingle[entityName] = singleRelations;
+
+        return relation;
+    }
+
+    /**
+     * Setups a relation n-m between two models
+     *
+     * @param ModelInterface $model
+     * @param mixed          $fields
+     * @param string         $intermediateModel
+     * @param mixed          $intermediateFields
+     * @param mixed          $intermediateReferencedFields
+     * @param string         $referencedModel
+     * @param mixed          $referencedFields
+     * @param array          $options
+     *
+     * @return RelationInterface
+     *
+     * @phpstan-param mvc_relation_options $options
+     */
+    public function addHasManyToMany(
+        <ModelInterface> model,
+        var fields,
+         string intermediateModel,
+        var intermediateFields,
+        var intermediateReferencedFields,
+         string referencedModel,
+        var referencedFields,
+        array options = []
+    ) -> <RelationInterface> {
+        var entityName, referencedEntity, hasManyToMany, relation, relations,
+            alias, lowerAlias, singleRelations, intermediateEntity;
+        string keyRelation;
+
+        let entityName = get_class_lower(model),
+            intermediateEntity = strtolower(intermediateModel),
+            referencedEntity = strtolower(referencedModel),
+            keyRelation = entityName . "$" . referencedEntity;
+
+        let hasManyToMany = this->hasManyToMany;
+
+        if !fetch relations, hasManyToMany[keyRelation] {
+            let relations = [];
+        }
+
+        /**
+         * Check if the number of fields are the same from the model to the
+         * intermediate model
+         */
+        if typeof intermediateFields == "array" {
+            if unlikely this->getFieldsCount(fields) != this->getFieldsCount(intermediateFields) {
+                throw new ReferencedFieldsMismatch("HasManytoMany", entityName, referencedEntity);
+            }
+        }
+
+        /**
+         * Check if the number of fields are the same from the intermediate
+         * model to the referenced model
+         */
+        if typeof intermediateReferencedFields == "array" {
+            if unlikely this->getFieldsCount(intermediateReferencedFields) != this->getFieldsCount(referencedFields) {
+                throw new ReferencedFieldsMismatch("HasManytoMany", entityName, referencedEntity);
+            }
+        }
+
+        /**
+         * Create a relationship instance
+         */
+        let relation = new Relation(
+            Relation::HAS_MANY_THROUGH,
+            referencedModel,
+            fields,
+            referencedFields,
+            options
+        );
+
+        /**
+         * Set extended intermediate relation data
+         */
+        relation->setIntermediateRelation(
+            intermediateFields,
+            intermediateModel,
+            intermediateReferencedFields
+        );
+
+        /**
+         * Check an alias for the relation
+         */
+        if fetch alias, options["alias"] {
+            if typeof alias != "string" {
+                throw new RelationAliasMustBeString("HasManytoMany", entityName, referencedEntity);
+            }
+
+            let lowerAlias = strtolower(alias);
+        } else {
+            let lowerAlias = referencedEntity;
+        }
+
+        /**
+         * Append a new relationship
+         */
+        let relations[] = relation;
+
+        /**
+         * Update the global alias
+         */
+        let this->aliases[entityName . "$" . lowerAlias] = relation;
+
+        /**
+         * Update the relations
+         */
+        let this->hasManyToMany[keyRelation] = relations;
+
+        /**
+         * Get existing relations by model
+         */
+        if !fetch singleRelations, this->hasManyToManySingle[entityName] {
+            let singleRelations = [];
+        }
+
+        /**
+         * Append a new relationship
+         */
+        let singleRelations[] = relation;
+
+        /**
+         * Update relations by model
+         */
+        let this->hasManyToManySingle[entityName] = singleRelations;
+
+        return relation;
+    }
+
+    /**
+     * Setup a 1-1 relation between two models
+     *
+     * @param ModelInterface $model
+     * @param mixed          $fields
+     * @param string         $referencedModel
+     * @param mixed          $referencedFields
+     * @param array          $options
+     *
+     * @return RelationInterface
+     *
+     * @phpstan-param mvc_relation_options $options
+     */
+    public function addHasOne(
+        <ModelInterface> model,
+        var fields,
+         string referencedModel,
+        var referencedFields,
+        array options = []
+    ) -> <RelationInterface> {
+        var entityName, referencedEntity, relation, relations, alias,
+            lowerAlias, singleRelations;
+        string keyRelation;
+
+        let entityName = get_class_lower(model),
+            referencedEntity = strtolower(referencedModel);
+
+        let keyRelation = entityName . "$" . referencedEntity;
+
+        if !fetch relations, this->hasOne[keyRelation] {
+            let relations = [];
+        }
+
+        /**
+         * Check if the number of fields are the same
+         */
+        if typeof referencedFields == "array" {
+            if unlikely this->getFieldsCount(fields) != this->getFieldsCount(referencedFields) {
+                throw new ReferencedFieldsMismatch("HasOne", entityName, referencedEntity);
+            }
+        }
+
+        /**
+         * Create a relationship instance
+         */
+        let relation = new Relation(
+            Relation::HAS_ONE,
+            referencedModel,
+            fields,
+            referencedFields,
+            options
+        );
+
+        /**
+         * Check an alias for the relation
+         */
+        if fetch alias, options["alias"] {
+            if unlikely typeof alias != "string" {
+                throw new RelationAliasMustBeString("HasOne", entityName, referencedEntity);
+            }
+
+            let lowerAlias = strtolower(alias);
+        } else {
+            let lowerAlias = referencedEntity;
+        }
+
+        /**
+         * Append a new relationship
+         * Update the global alias
+         * Update the relations
+         */
+        let relations[] = relation,
+            this->aliases[entityName . "$" . lowerAlias] = relation,
+            this->hasOne[keyRelation] = relations;
+
+        /**
+         * Get existing relations by model
+         */
+        if !fetch singleRelations, this->hasOneSingle[entityName] {
+            let singleRelations = [];
+        }
+
+        /**
+         * Append a new relationship
+         */
+        let singleRelations[] = relation;
+
+        /**
+         * Update relations by model
+         */
+        let this->hasOneSingle[entityName] = singleRelations;
+
+        return relation;
+    }
+
+    /**
+     * Setups a relation 1-1 between two models using an intermediate model
+     *
+     * @param ModelInterface $model
+     * @param mixed          $fields
+     * @param string         $intermediateModel
+     * @param mixed          $intermediateFields
+     * @param mixed          $intermediateReferencedFields
+     * @param string         $referencedModel
+     * @param mixed          $referencedFields
+     * @param array          $options
+     *
+     * @return RelationInterface
+     *
+     * @phpstan-param mvc_relation_options $options
+     */
+    public function addHasOneThrough(
+        <ModelInterface> model,
+        var fields,
+         string intermediateModel,
+        var intermediateFields,
+        var intermediateReferencedFields,
+         string referencedModel,
+        var referencedFields,
+        array options = []
+    ) -> <RelationInterface> {
+        var entityName, referencedEntity, hasOneThrough, relation, relations,
+            alias, lowerAlias, singleRelations, intermediateEntity;
+        string keyRelation;
+
+        let entityName = get_class_lower(model),
+            intermediateEntity = strtolower(intermediateModel),
+            referencedEntity = strtolower(referencedModel),
+            keyRelation = entityName . "$" . referencedEntity;
+
+        let hasOneThrough = this->hasOneThrough;
+
+        if !fetch relations, hasOneThrough[keyRelation] {
+            let relations = [];
+        }
+
+        /**
+         * Check if the number of fields are the same from the model to the
+         * intermediate model
+         */
+        if typeof intermediateFields == "array" {
+            if unlikely this->getFieldsCount(fields) != this->getFieldsCount(intermediateFields) {
+                throw new ReferencedFieldsMismatch("HasOneThrough", entityName, referencedEntity);
+            }
+        }
+
+        /**
+         * Check if the number of fields are the same from the intermediate
+         * model to the referenced model
+         */
+        if typeof intermediateReferencedFields == "array" {
+            if unlikely this->getFieldsCount(intermediateReferencedFields) != this->getFieldsCount(referencedFields) {
+                throw new ReferencedFieldsMismatch("HasOneThrough", entityName, referencedEntity);
+            }
+        }
+
+        /**
+         * Create a relationship instance
+         */
+        let relation = new Relation(
+            Relation::HAS_ONE_THROUGH,
+            referencedModel,
+            fields,
+            referencedFields,
+            options
+        );
+
+        /**
+         * Set extended intermediate relation data
+         */
+        relation->setIntermediateRelation(
+            intermediateFields,
+            intermediateModel,
+            intermediateReferencedFields
+        );
+
+        /**
+         * Check an alias for the relation
+         */
+        if fetch alias, options["alias"] {
+            if typeof alias != "string" {
+                throw new RelationAliasMustBeString("HasOneThrough", entityName, referencedEntity);
+            }
+
+            let lowerAlias = strtolower(alias);
+        } else {
+            let lowerAlias = referencedEntity;
+        }
+
+        /**
+         * Append a new relationship
+         */
+        let relations[] = relation;
+
+        /**
+         * Update the global alias
+         */
+        let this->aliases[entityName . "$" . lowerAlias] = relation;
+
+        /**
+         * Update the relations
+         */
+        let this->hasOneThrough[keyRelation] = relations;
+
+        /**
+         * Get existing relations by model
+         */
+        if !fetch singleRelations, this->hasOneThroughSingle[entityName] {
+            let singleRelations = [];
+        }
+
+        /**
+         * Append a new relationship
+         */
+        let singleRelations[] = relation;
+
+        /**
+         * Update relations by model
+         */
+        let this->hasOneThroughSingle[entityName] = singleRelations;
+
+        return relation;
+    }
+
+    /**
+     * Clears the internal reusable list
+     */
+    public function clearReusableObjects() -> void
+    {
+        let this->reusable = [];
+    }
+
+    /**
+     * Creates a Phalcon\Mvc\Model\Query\Builder
+     *
+     * @param array|string|null params
+     */
+    public function createBuilder(var params = null) -> <BuilderInterface>
+    {
+        var container;
+
+        let container = <DiInterface> this->container;
+
+        if unlikely typeof container != "object" {
+            throw new ManagerOrmServicesUnavailable();
+        }
+
+        /**
+         * Gets Builder instance from DI container
+         */
+        let this->builder = <BuilderInterface> container->get(
+            Builder::class,
+            [
+                params,
+                container
+            ]
+        );
+
+        return this->builder;
+    }
+
+    /**
+     * Creates a Phalcon\Mvc\Model\Query without execute it
+     *
+     * @throws Exception
+     */
+    public function createQuery(string phql) -> <QueryInterface>
+    {
+        var container, query;
+
+        let container = this->container;
+
+        if unlikely typeof container != "object" {
+            throw new ManagerOrmServicesUnavailable();
+        }
+
+        /**
+         * Create a query
+         */
+        let query = <QueryInterface> container->get(
+            Query::class,
+            [phql, container]
+        );
+
+        let this->lastQuery = query;
+
+        return query;
+    }
+
+    /**
+     * Creates a Phalcon\Mvc\Model\Query and execute it
+     *
+     * ```php
+     * $model = new Invoices();
+     * $manager = $model->getModelsManager();
+     *
+     * // \Phalcon\Mvc\Model\Resultset\Simple
+     * $manager->executeQuery('SELECT * FROM Invoices');
+     *
+     * // \Phalcon\Mvc\Model\Resultset\Complex
+     * $manager->executeQuery('SELECT COUNT(inv_status_flag) FROM Invoices GROUP BY inv_status_flag');
+     *
+     * // \Phalcon\Mvc\Model\Query\StatusInterface
+     * $manager->executeQuery('INSERT INTO Invoices (inv_id) VALUES (1)');
+     *
+     * // \Phalcon\Mvc\Model\Query\StatusInterface
+     * $manager->executeQuery('UPDATE Invoices SET inv_id = 0 WHERE inv_id = :id:', ['id' => 1]);
+     *
+     * // \Phalcon\Mvc\Model\Query\StatusInterface
+     * $manager->executeQuery('DELETE FROM Invoices WHERE inv_id = :id:', ['id' => 1]);
+     * ```
+     *
+     * @param string     $phql
+     * @param array|null $placeholders
+     * @param array|null $types
+     *
+     * @return ResultsetInterface|StatusInterface
+     */
+    public function executeQuery(string phql, var placeholders = null, var types = null) -> var
+    {
+        var query;
+
+        let query = this->createQuery(phql);
+
+        if typeof placeholders == "array" {
+            query->setBindParams(placeholders);
+        }
+
+        if typeof types == "array" {
+            query->setBindTypes(types);
+        }
+
+        /**
+         * Execute the query
+         */
+        return query->execute();
+    }
+
+    /**
+     * Checks whether a model has a belongsTo relation with another model
+     * @deprecated
+     */
+    public function existsBelongsTo(string modelName,  string modelRelation) -> bool
+    {
+        return this->hasBelongsTo(modelName, modelRelation);
+    }
+
+    /**
+     * Checks whether a model has a hasMany relation with another model
+     * @deprecated
+     */
+    public function existsHasMany(string modelName,  string modelRelation) -> bool
+    {
+        return this->hasHasMany(modelName, modelRelation);
+    }
+
+    /**
+     * Checks whether a model has a hasManyToMany relation with another model
+     * @deprecated
+     */
+    public function existsHasManyToMany(string modelName,  string modelRelation) -> bool
+    {
+        return this->hasHasManyToMany(modelName, modelRelation);
+    }
+
+    /**
+     * Checks whether a model has a hasOne relation with another model
+     * @deprecated
+     */
+    public function existsHasOne(string modelName,  string modelRelation) -> bool
+    {
+        return this->hasHasOne(modelName, modelRelation);
+    }
+
+    /**
+     * Checks whether a model has a hasOneThrough relation with another model
+     * @deprecated
+     */
+    public function existsHasOneThrough(string modelName,  string modelRelation) -> bool
+    {
+        return this->hasHasOneThrough(modelName, modelRelation);
+    }
+
+    /**
+     * Gets all the belongsTo relations defined in a model
+     *
+     *```php
+     * $relations = $modelsManager->getBelongsTo(
+     *     new Invoices()
+     * );
+     *```
+     *
+     * @return array|RelationInterface[]
+     */
+    public function getBelongsTo(<ModelInterface> model) -> <RelationInterface[]> | array
+    {
+        var relations;
+
+        if !fetch relations, this->belongsToSingle[get_class_lower(model)] {
+            return [];
+        }
+
+        return relations;
+    }
+
+    /**
+     * Gets belongsTo related records from a model
+     *
+     * @param string         $modelName
+     * @param string         $modelRelation
+     * @param ModelInterface $record
+     * @param mixed|null     $parameters
+     * @param string|null    $method
+     *
+     * @return ResultsetInterface | bool
+     *
+     * @phpstan-param mvc_model_parameters|string|null $parameters
+     */
+    public function getBelongsToRecords(
+         string modelName,
+         string modelRelation,
+        <ModelInterface> record,
+        parameters = null,
+        string method = null
+    ) -> <ResultsetInterface> | bool {
+        var relations;
+        string keyRelation;
+
+        /**
+         * Check if there is a relation between them
+         */
+        let keyRelation = strtolower(modelName) . "$" . strtolower(modelRelation);
+
+        if !fetch relations, this->hasMany[keyRelation] {
+            return false;
+        }
+
+        /**
+         * "relations" is an array with all the belongsTo relationships to that model
+         * Perform the query
+         */
+        return this->getRelationRecords(
+            relations[0],
+            record,
+            parameters,
+            method
+        );
+    }
+
+    /**
+     * Returns the newly created Phalcon\Mvc\Model\Query\Builder or null
+     */
+    public function getBuilder() -> <BuilderInterface> | null
+    {
+        return this->builder;
+    }
+
+    /**
+     * Returns the connection service name used to read or write data related to
+     * a model depending on the connection services
+     *
+     * @phpstan-param array<string, string> $connectionServices
+     */
+    public function getConnectionService(
+        <ModelInterface> model,
+        array connectionServices
+    ) -> string {
+        var connection;
+
+        if !fetch connection, connectionServices[get_class_lower(model)] {
+            return "db";
+        }
+
+        return connection;
+    }
+
+    /**
+     * Returns a custom events manager related to a model or null if there is
+     * no related events manager
+     */
+    public function getCustomEventsManager(<ModelInterface> model) -> <EventsManagerInterface> | null
+    {
+        var eventsManager;
+
+        if fetch eventsManager, this->customEventsManager[get_class_lower(model)] {
+            return eventsManager;
+        }
+
+        return null;
+    }
+
+    /**
+     * Returns the DependencyInjector container
+     */
+    public function getDI() -> <DiInterface>
+    {
+        return this->container;
+    }
+
+    /**
+     * Returns the internal event manager
+     */
+    public function getEventsManager() -> <EventsManagerInterface> | null
+    {
+        return this->eventsManager;
+    }
+
+    /**
+     * Gets hasMany relations defined on a model
+     */
+    public function getHasMany(<ModelInterface> model) -> <RelationInterface[]> | array
+    {
+        var relations;
+
+        if !fetch relations, this->hasManySingle[get_class_lower(model)] {
+            return [];
+        }
+
+        return relations;
+    }
+
+    /**
+     * Gets hasMany related records from a model
+     *
+     * @phpstan-param mvc_model_parameters|string|null $parameters
+     */
+    public function getHasManyRecords(string modelName,  string modelRelation, <ModelInterface> record, parameters = null, string method = null)
+        -> <ResultsetInterface> | bool
+    {
+        var relations;
+        string keyRelation;
+
+        /**
+         * Check if there is a relation between them
+         */
+        let keyRelation = strtolower(modelName) . "$" . strtolower(modelRelation);
+
+        if !fetch relations, this->hasMany[keyRelation] {
+            return false;
+        }
+
+        /**
+         * "relations" is an array with all the hasMany relationships to that model
+         * Perform the query
+         */
+        return this->getRelationRecords(
+            relations[0],
+            record,
+            parameters,
+            method
+        );
+    }
+
+    /**
+     * Gets hasManyToMany relations defined on a model
+     */
+    public function getHasManyToMany(<ModelInterface> model) -> <RelationInterface[]> | array
+    {
+        var relations;
+
+        if !fetch relations, this->hasManyToManySingle[get_class_lower(model)] {
+            return [];
+        }
+
+        return relations;
+    }
+
+    /**
+     * Gets hasOne relations defined on a model
+     */
+    public function getHasOne(<ModelInterface> model) -> array
+    {
+        var relations;
+
+        if !fetch relations, this->hasOneSingle[get_class_lower(model)] {
+            return [];
+        }
+
+        return relations;
+    }
+
+    /**
+     * Gets hasOne relations defined on a model
+     */
+    public function getHasOneAndHasMany(<ModelInterface> model) -> <RelationInterface[]>
+    {
+        return array_merge(
+            this->getHasOne(model),
+            this->getHasMany(model)
+        );
+    }
+
+    /**
+     * Gets belongsTo related records from a model
+     *
+     * @phpstan-param mvc_model_parameters|string|null $parameters
+     */
+    public function getHasOneRecords(string modelName,  string modelRelation, <ModelInterface> record, parameters = null, string method = null)
+        -> <ModelInterface> | bool
+    {
+        var relations;
+        string keyRelation;
+
+        /**
+         * Check if there is a relation between them
+         */
+        let keyRelation = strtolower(modelName) . "$" . strtolower(modelRelation);
+
+        if !fetch relations, this->hasOne[keyRelation] {
+            return false;
+        }
+
+        /**
+         * "relations" is an array with all the belongsTo relationships to that model
+         * Perform the query
+         */
+        return this->getRelationRecords(
+            relations[0],
+            record,
+            parameters,
+            method
+        );
+    }
+
+    /**
+     * Gets hasOneThrough relations defined on a model
+     */
+    public function getHasOneThrough(<ModelInterface> model) -> <RelationInterface[]> | array
+    {
+        var relations;
+
+        if !fetch relations, this->hasOneThroughSingle[get_class_lower(model)] {
+            return [];
+        }
+
+        return relations;
+    }
+
+    /**
+     * Get last initialized model
+     */
+    public function getLastInitialized() -> <ModelInterface> | null
+    {
+        return this->lastInitialized;
+    }
+
+    /**
+     * Returns the last query created or executed in the models manager
+     */
+    public function getLastQuery() -> <QueryInterface>
+    {
+        return this->lastQuery;
+    }
+
+    /**
+     * Returns the prefix for all model sources.
+     */
+    public function getModelPrefix() -> string
+    {
+        return this->prefix;
+    }
+
+    /**
+     * Returns the mapped schema for a model
+     */
+    public function getModelSchema(<ModelInterface> model) -> string | null
+    {
+        var schema;
+
+        if !fetch schema, this->schemas[get_class_lower(model)] {
+            return null;
+        }
+
+        return schema;
+    }
+
+    /**
+     * Returns the mapped source for a model
+     */
+    public function getModelSource(<ModelInterface> model) -> string
+    {
+        var entityName;
+
+        let entityName = get_class_lower(model);
+
+        if !isset this->sources[entityName] {
+            this->setModelSource(
+                model,
+                uncamelize(
+                    get_class_ns(model)
+                )
+            );
+        }
+
+        return this->prefix . this->sources[entityName];
+    }
+
+    /**
+     * Returns the connection to read data related to a model
+     */
+    public function getReadConnection(<ModelInterface> model) -> <AdapterInterface>
+    {
+        var writeService;
+
+        /**
+         * When sticky is enabled and the model's write service has been
+         * written to during this request cycle, serve reads from the write
+         * connection so freshly written data can be read back immediately.
+         */
+        if this->sticky {
+            let writeService = this->getConnectionService(
+                model,
+                this->writeConnectionServices
+            );
+
+            if isset this->dirtyWriteServices[writeService] {
+                return this->getConnection(model, this->writeConnectionServices);
+            }
+        }
+
+        return this->getConnection(model, this->readConnectionServices);
+    }
+
+    /**
+     * Returns the connection service name used to read data related to a model
+     */
+    public function getReadConnectionService(<ModelInterface> model) -> string
+    {
+        return this->getConnectionService(
+            model,
+            this->readConnectionServices
+        );
+    }
+
+    /**
+     * Returns a relation by its alias
+     */
+    public function getRelationByAlias(string modelName,  string alias) -> bool | <RelationInterface>
+    {
+        var relation;
+
+        if !fetch relation, this->aliases[strtolower(modelName . "$" . alias)] {
+            return false;
+        }
+
+        return relation;
+    }
+
+    /**
      * Helper method to query records based on a relation definition
+     *
+     * @param RelationInterface $relation
+     * @param ModelInterface    $record
+     * @param mixed|null        $parameters
+     * @param string|null       $method
      *
      * @return \Phalcon\Mvc\Model\Resultset\Simple|int|false
      */
-    public function getRelationRecords(<RelationInterface> relation, <ModelInterface> record, var parameters = null, string method = null)
-    {
-        var referencedModel, intermediateModel, intermediateFields, fields,
-            builder, extraParameters, refPosition, field, referencedFields,
-            findParams, findArguments, uniqueKey, records, arguments, rows,
-            firstRow, query;
+    public function getRelationRecords(
+        <RelationInterface> relation,
+        <ModelInterface> record,
+        var parameters = null,
+        string method = null
+    ) {
+        var arguments, builder, extraParameters, field, fields, findArguments,
+            findParams, firstRow, intermediateFields, intermediateModel,
+            intermediateReferenceFields, query, refPosition, referencedFields,
+            referencedModel, rows,
+            records   = null,
+            uniqueKey = null;
         array placeholders, conditions, joinConditions;
         bool reusable;
-        string retrieveMethod;
+        string retrieveMethod = null;
+        int i, columnCount;
 
         /**
          * Re-use bound parameters
@@ -1512,33 +1474,39 @@ class Manager implements ManagerInterface, InjectionAwareInterface, EventsAwareI
              * relation
              */
             let fields = relation->getFields();
-
-            if unlikely typeof fields == "array" {
-                throw new Exception("Not supported");
-            }
-
-            let conditions[] = "[" . intermediateModel . "].[" . intermediateFields . "] = :APR0:",
+            if unlikely typeof fields === "array" {
+                let columnCount = count(fields) - 1;
+                for i in range(0, columnCount) {
+                    let conditions[] = "[" . intermediateModel . "].[". intermediateFields[i] . "] = :APR" . i . ":",
+                    placeholders["APR" . i] = record->readAttribute(fields[i]);
+                }
+            } else {
+                let conditions[] = "[" . intermediateModel . "].[" . intermediateFields . "] = :APR0:",
                 placeholders["APR0"] = record->readAttribute(fields);
+            }
 
             let joinConditions = [];
 
             /**
              * Create the join conditions
              */
-            let intermediateFields = relation->getIntermediateReferencedFields();
-
-            if unlikely typeof intermediateFields == "array" {
-                throw new Exception("Not supported");
+            let intermediateReferenceFields = relation->getIntermediateReferencedFields();
+            let referencedFields = relation->getReferencedFields();
+            if unlikely typeof intermediateReferenceFields === "array" {
+                let columnCount = count(intermediateReferenceFields) - 1;
+                for i in range(0, columnCount) {
+                    let joinConditions[] = "[" . intermediateModel . "].[" . intermediateReferenceFields[i] . "] = [" . referencedModel . "].[" . referencedFields[i] . "]";
+                }
+            } else {
+                let joinConditions[] = "[" . intermediateModel . "].[" . intermediateReferenceFields . "] = [" . referencedModel . "].[" . referencedFields . "]";
             }
-
-            let joinConditions[] = "[" . intermediateModel . "].[" . intermediateFields . "] = [" . referencedModel . "].[" . relation->getReferencedFields() . "]";
 
             /**
              * We don't trust the user or the database so we use bound parameters
              * Create a query builder
              */
             let builder = this->createBuilder(
-                this->_mergeFindParameters(extraParameters, parameters)
+                self::mergeFindParameters(extraParameters, parameters)
             );
 
             builder->from(referencedModel);
@@ -1568,16 +1536,48 @@ class Manager implements ManagerInterface, InjectionAwareInterface, EventsAwareI
              */
             let query = <QueryInterface> builder->getQuery();
 
+            let reusable = (bool) relation->isReusable();
+
+            if reusable {
+                if record instanceof CacheKeyProvider {
+                    let uniqueKey = record->getUniqueKey();
+                } else {
+                    /**
+                     * The placeholders hold the value of every field the
+                     * relation covers, so a compound relation gets a key of
+                     * its own.
+                     */
+                    let uniqueKey = unique_key(
+                        referencedModel,
+                        [intermediateModel, parameters, placeholders]
+                    );
+                }
+
+                let records = this->getReusableRecords(referencedModel, uniqueKey);
+
+                if typeof records == "array" || typeof records == "object" {
+                    return records;
+                }
+            }
+
             switch relation->getType() {
                 case Relation::HAS_MANY_THROUGH:
-                    return query->execute();
+                    let records = query->execute();
+                    break;
 
                 case Relation::HAS_ONE_THROUGH:
-                    return query->setUniqueRow(true)->execute();
+                    let records = query->setUniqueRow(true)->execute();
+                    break;
 
                 default:
-                    throw new Exception("Unknown relation type");
+                    throw new UnknownRelationType();
             }
+
+            if reusable {
+                this->setReusableRecords(referencedModel, uniqueKey, records);
+            }
+
+            return records;
         }
 
         let conditions = [];
@@ -1593,11 +1593,11 @@ class Manager implements ManagerInterface, InjectionAwareInterface, EventsAwareI
         let referencedFields = relation->getReferencedFields();
 
         if typeof fields != "array" {
-            let conditions[] = "[". referencedFields . "] = :APR0:",
+            let conditions[] = "[" . referencedModel . "].[". referencedFields . "] = :APR0:",
                 placeholders["APR0"] = record->readAttribute(fields);
         } else {
             for refPosition, field in relation->getFields() {
-                let conditions[] = "[". referencedFields[refPosition] . "] = :APR" . refPosition . ":",
+                let conditions[] = "[" . referencedModel . "].[". referencedFields[refPosition] . "] = :APR" . refPosition . ":",
                     placeholders["APR" . refPosition] = record->readAttribute(field);
             }
         }
@@ -1612,10 +1612,10 @@ class Manager implements ManagerInterface, InjectionAwareInterface, EventsAwareI
             "di"        : record->{"getDi"}()
         ];
 
-        let findArguments = this->_mergeFindParameters(findParams, parameters);
+        let findArguments = self::mergeFindParameters(findParams, parameters);
 
         if typeof extraParameters == "array" {
-            let findParams = this->_mergeFindParameters(
+            let findParams = self::mergeFindParameters(
                 extraParameters,
                 findArguments
             );
@@ -1638,7 +1638,7 @@ class Manager implements ManagerInterface, InjectionAwareInterface, EventsAwareI
                     break;
 
                 default:
-                    throw new Exception("Unknown relation type");
+                    throw new UnknownRelationType();
             }
         } else {
             let retrieveMethod = method;
@@ -1650,8 +1650,13 @@ class Manager implements ManagerInterface, InjectionAwareInterface, EventsAwareI
         let reusable = (bool) relation->isReusable();
 
         if reusable {
-            let uniqueKey = unique_key(referencedModel, [findParams, retrieveMethod]),
-                records = this->getReusableRecords(referencedModel, uniqueKey);
+            if record instanceof CacheKeyProvider {
+                let uniqueKey = record->getUniqueKey();
+            } else {
+                let uniqueKey = unique_key(referencedModel, [findParams, retrieveMethod]);
+            }
+
+            let records = this->getReusableRecords(referencedModel, uniqueKey);
 
             if typeof records == "array" || typeof records == "object" {
                 return records;
@@ -1683,216 +1688,11 @@ class Manager implements ManagerInterface, InjectionAwareInterface, EventsAwareI
     }
 
     /**
-     * Returns a reusable object from the internal list
-     */
-    public function getReusableRecords(string! modelName, string! key)
-    {
-        var records;
-
-        if !fetch records, this->reusable[key] {
-            return null;
-        }
-
-        return records;
-    }
-
-    /**
-     * Stores a reusable record in the internal list
-     */
-    public function setReusableRecords(string! modelName, string! key, var records) -> void
-    {
-        let this->reusable[key] = records;
-    }
-
-    /**
-     * Clears the internal reusable list
-     */
-    public function clearReusableObjects() -> void
-    {
-        let this->reusable = [];
-    }
-
-    /**
-     * Gets belongsTo related records from a model
-     */
-    public function getBelongsToRecords(string! modelName, string! modelRelation, <ModelInterface> record, parameters = null, string method = null)
-        -> <ResultsetInterface> | bool
-    {
-        var relations;
-        string keyRelation;
-
-        /**
-         * Check if there is a relation between them
-         */
-        let keyRelation = strtolower(modelName) . "$" . strtolower(modelRelation);
-
-        if !fetch relations, this->hasMany[keyRelation] {
-            return false;
-        }
-
-        /**
-         * "relations" is an array with all the belongsTo relationships to that model
-         * Perform the query
-         */
-        return this->getRelationRecords(
-            relations[0],
-            record,
-            parameters,
-            method
-        );
-    }
-
-    /**
-     * Gets hasMany related records from a model
-     */
-    public function getHasManyRecords(string! modelName, string! modelRelation, <ModelInterface> record, parameters = null, string method = null)
-        -> <ResultsetInterface> | bool
-    {
-        var relations;
-        string keyRelation;
-
-        /**
-         * Check if there is a relation between them
-         */
-        let keyRelation = strtolower(modelName) . "$" . strtolower(modelRelation);
-
-        if !fetch relations, this->hasMany[keyRelation] {
-            return false;
-        }
-
-        /**
-         * "relations" is an array with all the hasMany relationships to that model
-         * Perform the query
-         */
-        return this->getRelationRecords(
-            relations[0],
-            record,
-            parameters,
-            method
-        );
-    }
-
-    /**
-     * Gets belongsTo related records from a model
-     */
-    public function getHasOneRecords(string! modelName, string! modelRelation, <ModelInterface> record, parameters = null, string method = null)
-        -> <ModelInterface> | bool
-    {
-        var relations;
-        string keyRelation;
-
-        /**
-         * Check if there is a relation between them
-         */
-        let keyRelation = strtolower(modelName) . "$" . strtolower(modelRelation);
-
-        if !fetch relations, this->hasOne[keyRelation] {
-            return false;
-        }
-
-        /**
-         * "relations" is an array with all the belongsTo relationships to that model
-         * Perform the query
-         */
-        return this->getRelationRecords(
-            relations[0],
-            record,
-            parameters,
-            method
-        );
-    }
-
-    /**
-     * Gets all the belongsTo relations defined in a model
-     *
-     *```php
-     * $relations = $modelsManager->getBelongsTo(
-     *     new Robots()
-     * );
-     *```
-     */
-    public function getBelongsTo(<ModelInterface> model) -> <RelationInterface[]> | array
-    {
-        var relations;
-
-        if !fetch relations, this->belongsToSingle[get_class_lower(model)] {
-            return [];
-        }
-
-        return relations;
-    }
-
-    /**
-     * Gets hasMany relations defined on a model
-     */
-    public function getHasMany(<ModelInterface> model) -> <RelationInterface[]> | array
-    {
-        var relations;
-
-        if !fetch relations, this->hasManySingle[get_class_lower(model)] {
-            return [];
-        }
-
-        return relations;
-    }
-
-    /**
-     * Gets hasOne relations defined on a model
-     */
-    public function getHasOne(<ModelInterface> model) -> array
-    {
-        var relations;
-
-        if !fetch relations, this->hasOneSingle[get_class_lower(model)] {
-            return [];
-        }
-
-        return relations;
-    }
-
-    /**
-     * Gets hasOneThrough relations defined on a model
-     */
-    public function getHasOneThrough(<ModelInterface> model) -> <RelationInterface[]> | array
-    {
-        var relations;
-
-        if !fetch relations, this->hasOneThroughSingle[get_class_lower(model)] {
-            return [];
-        }
-
-        return relations;
-    }
-
-    /**
-     * Gets hasManyToMany relations defined on a model
-     */
-    public function getHasManyToMany(<ModelInterface> model) -> <RelationInterface[]> | array
-    {
-        var relations;
-
-        if !fetch relations, this->hasManyToManySingle[get_class_lower(model)] {
-            return [];
-        }
-
-        return relations;
-    }
-
-    /**
-     * Gets hasOne relations defined on a model
-     */
-    public function getHasOneAndHasMany(<ModelInterface> model) -> <RelationInterface[]>
-    {
-        return array_merge(
-            this->getHasOne(model),
-            this->getHasMany(model)
-        );
-    }
-
-    /**
      * Query all the relationships defined on a model
+     *
+     * @return RelationInterface[]
      */
-    public function getRelations(string! modelName) -> <RelationInterface[]>
+    public function getRelations(string modelName) -> <RelationInterface[]>
     {
         var entityName, relations, relation;
         array allRelations;
@@ -1950,8 +1750,10 @@ class Manager implements ManagerInterface, InjectionAwareInterface, EventsAwareI
 
     /**
      * Query the first relationship defined between two models
+     *
+     * @return bool|RelationInterface[]
      */
-    public function getRelationsBetween(string! first, string! second) -> <RelationInterface[]> | bool
+    public function getRelationsBetween(string first,  string second) -> <RelationInterface[]> | bool
     {
         var relations;
         string keyRelation;
@@ -1987,8 +1789,8 @@ class Manager implements ManagerInterface, InjectionAwareInterface, EventsAwareI
         }
 
         /**
-        * Check whether it's a has-many-to-many relationship
-        */
+         * Check whether it's a has-many-to-many relationship
+         */
         if fetch relations, this->hasManyToMany[keyRelation] {
             return relations;
         }
@@ -1997,128 +1799,638 @@ class Manager implements ManagerInterface, InjectionAwareInterface, EventsAwareI
     }
 
     /**
-     * Creates a Phalcon\Mvc\Model\Query without execute it
+     * Returns a reusable object from the internal list
+     *
+     * @return mixed
      */
-    public function createQuery(string! phql) -> <QueryInterface>
+    public function getReusableRecords(string modelName, string key)
     {
-        var container, query;
+        var records;
 
-        let container = this->container;
+        if !fetch records, this->reusable[key] {
+            return null;
+        }
 
-        if unlikely typeof container != "object" {
-            throw new Exception(
-                Exception::containerServiceNotFound(
-                    "the services related to the ORM"
-                )
+        return records;
+    }
+
+    /**
+     * Returns the connection to write data related to a model
+     */
+    public function getWriteConnection(<ModelInterface> model) -> <AdapterInterface>
+    {
+        return this->getConnection(model, this->writeConnectionServices);
+    }
+
+    /**
+     * Returns the connection service name used to write data related to a model
+     */
+    public function getWriteConnectionService(<ModelInterface> model) -> string
+    {
+        return this->getConnectionService(
+            model,
+            this->writeConnectionServices
+        );
+    }
+
+    /**
+     * Checks whether a model has a belongsTo relation with another model
+     */
+    public function hasBelongsTo(string modelName,  string modelRelation) -> bool
+    {
+        return this->checkHasRelationship("belongsTo", modelName, modelRelation);
+    }
+
+    /**
+     * Checks whether a model has a hasMany relation with another model
+     */
+    public function hasHasMany(string modelName,  string modelRelation) -> bool
+    {
+        return this->checkHasRelationship("hasMany", modelName, modelRelation);
+    }
+
+    /**
+     * Checks whether a model has a hasManyToMany relation with another model
+     */
+    public function hasHasManyToMany(string modelName,  string modelRelation) -> bool
+    {
+        return this->checkHasRelationship("hasManyToMany", modelName, modelRelation);
+    }
+
+    /**
+     * Checks whether a model has a hasOne relation with another model
+     */
+    public function hasHasOne(string modelName,  string modelRelation) -> bool
+    {
+        return this->checkHasRelationship("hasOne", modelName, modelRelation);
+    }
+
+    /**
+     * Checks whether a model has a hasOneThrough relation with another model
+     */
+    public function hasHasOneThrough(string modelName,  string modelRelation) -> bool
+    {
+        return this->checkHasRelationship("hasOneThrough", modelName, modelRelation);
+    }
+
+    /**
+     * Initializes a model in the model manager
+     *
+     * @throws EventsException
+     */
+    public function initialize(<ModelInterface> model) -> bool
+    {
+        var className, eventsManager;
+
+        let className = get_class_lower(model);
+
+        /**
+         * Models are just initialized once per request
+         */
+        if isset this->initialized[className] {
+            return false;
+        }
+
+        /**
+         * Update the model as initialized, this avoid cyclic initializations
+         */
+        let this->initialized[className] = true;
+
+        /**
+         * Call the 'initialize' method if it's implemented
+         */
+        if method_exists(model, "initialize") {
+            model->{"initialize"}();
+        }
+
+        /**
+         * Update the last initialized model, so it can be used in
+         * modelsManager:afterInitialize
+         */
+        let this->lastInitialized = model;
+
+        /**
+         * If an EventsManager is available we pass to it every initialized
+         * model
+         */
+        let eventsManager = <EventsManagerInterface> this->eventsManager;
+
+        if typeof eventsManager == "object" {
+            eventsManager->fire("modelsManager:afterInitialize", this, model);
+        }
+
+        /**
+         * Release the reference so the model instance is not permanently
+         * retained in memory (prevents a reference cycle in long-running
+         * processes). The event above already received the model directly.
+         */
+        let this->lastInitialized = null;
+
+        return true;
+    }
+
+    /**
+     * Check whether a model is already initialized
+     */
+    public function isInitialized(string className) -> bool
+    {
+        return isset this->initialized[strtolower(className)];
+    }
+
+    /**
+     * Checks if a model is keeping snapshots for the queried records
+     */
+    public function isKeepingSnapshots(<ModelInterface> model) -> bool
+    {
+        var isKeeping;
+
+        if Settings::get("orm.dynamic_update") {
+            return true;
+        }
+
+        if !fetch isKeeping, this->keepSnapshots[get_class_lower(model)] {
+            return false;
+        }
+
+        return isKeeping;
+    }
+
+    /**
+     * Checks if a model is using dynamic update instead of all-field update
+     */
+    public function isUsingDynamicUpdate(<ModelInterface> model) -> bool
+    {
+        var isUsing;
+
+        if Settings::get("orm.dynamic_update") {
+            return true;
+        }
+
+        if !fetch isUsing, this->dynamicUpdate[get_class_lower(model)] {
+            return false;
+        }
+
+        return isUsing;
+    }
+
+    /**
+     * Check whether a model property is declared as public.
+     *
+     * ```php
+     * $isPublic = $manager->isVisibleModelProperty(
+     *     new Invoices(),
+     *     "name"
+     * );
+     * ```
+     *
+     * @throws ReflectionException
+     */
+    final public function isVisibleModelProperty(<ModelInterface> model, string property) -> bool
+    {
+        var properties, className, publicProperties, classReflection,
+            reflectionProperties, reflectionProperty;
+
+        let className = get_class(model);
+
+        if !isset this->modelVisibility[className] {
+            let publicProperties = [];
+            let classReflection = new ReflectionClass(className);
+            let reflectionProperties = classReflection->getProperties(ReflectionProperty::IS_PUBLIC);
+            for reflectionProperty in reflectionProperties {
+                let publicProperties[reflectionProperty->name] = true;
+            }
+            let this->modelVisibility[className] = publicProperties;
+        }
+
+        let properties = this->modelVisibility[className];
+
+        return array_key_exists(property, properties);
+    }
+
+    /**
+     * Sets if a model must keep snapshots
+     */
+    public function keepSnapshots(<ModelInterface> model, bool keepSnapshots) -> void
+    {
+        let this->keepSnapshots[get_class_lower(model)] = keepSnapshots;
+    }
+
+    /**
+     * Loads a model throwing an exception if it does not exist
+     *
+     * @throws Exception
+     */
+    public function load(string modelName) -> <ModelInterface>
+    {
+        var model;
+
+        /**
+         * The model does not exist throw an exception
+         */
+        if unlikely !class_exists(modelName) {
+            throw new ModelCouldNotLoad(modelName);
+        }
+
+        /**
+         * Load it using an autoloader
+         */
+        let model = create_instance_params(
+            modelName,
+            [
+                null,
+                this->container,
+                this
+            ]
+        );
+
+        return model;
+    }
+
+    /**
+     * Dispatch an event to the listeners and behaviors
+     * This method expects that the endpoint listeners/behaviors returns true
+     * meaning that a least one was implemented
+     *
+     * @param ModelInterface $model
+     * @param string         $eventName
+     * @param mixed          $data
+     *
+     * @phpstan-param array<array-key, mixed> $data
+     */
+    public function missingMethod(<ModelInterface> model,  string eventName, var data)
+    {
+        var modelsBehaviors, result, eventsManager, behavior;
+
+        /**
+         * Dispatch events to the global events manager
+         */
+        if fetch modelsBehaviors, this->behaviors[get_class_lower(model)] {
+            /**
+             * Notify all the events on the behavior
+             */
+            for behavior in modelsBehaviors {
+                let result = behavior->missingMethod(model, eventName, data);
+
+                if result !== null {
+                    return result;
+                }
+            }
+        }
+
+        /**
+         * Dispatch events to the global events manager
+         */
+        let eventsManager = this->eventsManager;
+
+        if typeof eventsManager == "object" {
+            return eventsManager->fire(
+                "model:" . eventName,
+                model,
+                data
             );
         }
 
-        /**
-         * Create a query
-         */
-        let query = <QueryInterface> container->get(
-            "Phalcon\\Mvc\\Model\\Query",
-            [phql, container]
-        );
-
-        let this->lastQuery = query;
-
-        return query;
+        return null;
     }
 
     /**
-     * Creates a Phalcon\Mvc\Model\Query and execute it
+     * Receives events generated in the models and dispatches them to an
+     * events-manager if available. Notify the behaviors that are listening in
+     * the model
+     *
+     * @param string         $eventName
+     * @param ModelInterface $model
+     */
+    public function notifyEvent(string eventName, <ModelInterface> model)
+    {
+        var status, behavior, modelsBehaviors, eventsManager,
+            customEventsManager;
+
+        let status = true;
+
+        /**
+         * Dispatch events to the global events manager
+         */
+        if fetch modelsBehaviors, this->behaviors[get_class_lower(model)] {
+            /**
+             * Notify all the events on the behavior
+             */
+            for behavior in modelsBehaviors {
+                let status = behavior->notify(eventName, model);
+
+                if status === false {
+                    return false;
+                }
+            }
+        }
+
+        /**
+         * Dispatch events to the global events manager
+         *
+         * v7: the model is sent as the event source. This is incorrect.
+         * The source must be the caller, that is this manager, and the
+         * model must be the data of the event. Change this in v7 only,
+         * because listeners that read the source will break. The custom
+         * events manager below has the same problem and must change with
+         * it.
+         */
+        let eventsManager = this->eventsManager;
+
+        if typeof eventsManager == "object" {
+            let status = eventsManager->fire(
+                "model:" . eventName,
+                model
+            );
+
+            if status === false {
+                return status;
+            }
+        }
+
+        /**
+         * A model can has a specific events manager for it
+         */
+        if fetch customEventsManager, this->customEventsManager[get_class_lower(model)] {
+            let status = customEventsManager->fire(
+                "model:" . eventName,
+                model
+            );
+
+            if status === false {
+                return false;
+            }
+        }
+
+        return status;
+    }
+
+    /**
+     * Marks the model's write connection service as written-to for the
+     * current request cycle. Used by the sticky mechanism to route
+     * subsequent reads to the write connection.
+     */
+    public function registerWrite(<ModelInterface> model) -> void
+    {
+        if !this->sticky {
+            return;
+        }
+
+        let this->dirtyWriteServices[
+            this->getConnectionService(model, this->writeConnectionServices)
+        ] = true;
+    }
+
+    /**
+     * Removes a behavior from a model
+     *
+     * @param ModelInterface $model
+     * @param string         $behaviorClass
+     *
+     * @return void
+     */
+    public function removeBehavior(<ModelInterface> model,  string behaviorClass) -> void
+    {
+        var behavior, entityName;
+        array remaining;
+
+        let entityName = get_class_lower(model);
+
+        if !isset this->behaviors[entityName] {
+            return;
+        }
+
+        /**
+         * Collect the behaviors to keep and assign the result back in one
+         * statement. `unset this->behaviors[entityName][key]` cannot be used:
+         * a two-level unset on a property removes the key from a copy of the
+         * inner array, leaving the property unchanged.
+         */
+        let remaining = [];
+
+        for behavior in this->behaviors[entityName] {
+            if get_class(behavior) !== behaviorClass {
+                let remaining[] = behavior;
+            }
+        }
+
+        let this->behaviors[entityName] = remaining;
+    }
+
+    /**
+     * Clears the per-request sticky write tracking. Call this between
+     * requests in long-running runtimes (e.g. Swoole, RoadRunner) where the
+     * manager instance is reused across requests.
+     */
+    public function resetConnectionState() -> void
+    {
+        let this->dirtyWriteServices = [];
+    }
+
+    /**
+     * Sets both write and read connection service for a model
+     */
+    public function setConnectionService(<ModelInterface> model,  string connectionService) -> void
+    {
+        this->setReadConnectionService(model, connectionService);
+        this->setWriteConnectionService(model, connectionService);
+    }
+
+    /**
+     * Sets a custom events manager for a specific model
+     */
+    public function setCustomEventsManager(<ModelInterface> model, <EventsManagerInterface> eventsManager) -> void
+    {
+        let this->customEventsManager[get_class_lower(model)] = eventsManager;
+    }
+
+    /**
+     * Sets the DependencyInjector container
+     */
+    public function setDI(<DiInterface> container) -> void
+    {
+        let this->container = container;
+    }
+
+    /**
+     * Sets a global events manager
+     *
+     * @param EventsManagerInterface $eventsManager
+     *
+     * @return void
+     */
+    public function setEventsManager(<EventsManagerInterface> eventsManager) -> void
+    {
+        let this->eventsManager = eventsManager;
+    }
+
+    /**
+     * Sets the prefix for all model sources.
      *
      * ```php
-     * $model = new Robots();
-     * $manager = $model->getModelsManager();
+     * use Phalcon\Mvc\Model\Manager;
      *
-     * // \Phalcon\Mvc\Model\Resultset\Simple
-     * $manager->executeQuery('SELECT * FROM Robots');
+     * $di->set(
+     *     "modelsManager",
+     *     function () {
+     *         $modelsManager = new Manager();
      *
-     * // \Phalcon\Mvc\Model\Resultset\Complex
-     * $manager->executeQuery('SELECT COUNT(type) FROM Robots GROUP BY type');
+     *         $modelsManager->setModelPrefix("wp_");
      *
-     * // \Phalcon\Mvc\Model\Query\StatusInterface
-     * $manager->executeQuery('INSERT INTO Robots (id) VALUES (1)');
+     *         return $modelsManager;
+     *     }
+     * );
      *
-     * // \Phalcon\Mvc\Model\Query\StatusInterface
-     * $manager->executeQuery('UPDATE Robots SET id = 0 WHERE id = :id:', ['id' => 1]);
+     * $invoices = new Invoices();
      *
-     * // \Phalcon\Mvc\Model\Query\StatusInterface
-     * $manager->executeQuery('DELETE FROM Robots WHERE id = :id:', ['id' => 1]);
+     * echo $invoices->getSource(); // wp_co_invoices
      * ```
-     *
-     * @param array|null $placeholders
-     * @param array|null $types
-     * @return ResultsetInterface|StatusInterface
      */
-    public function executeQuery(string! phql, var placeholders = null, var types = null) -> var
+    public function setModelPrefix(string prefix) -> void
     {
-        var query;
-
-        let query = this->createQuery(phql);
-
-        if typeof placeholders == "array" {
-            query->setBindParams(placeholders);
-        }
-
-        if typeof types == "array" {
-            query->setBindTypes(types);
-        }
-
-        /**
-         * Execute the query
-         */
-        return query->execute();
+        let this->prefix = prefix;
     }
 
     /**
-     * Creates a Phalcon\Mvc\Model\Query\Builder
-     *
-     * @param array|string|null params
+     * Sets the mapped schema for a model
      */
-    public function createBuilder(var params = null) -> <BuilderInterface>
+    public function setModelSchema(<ModelInterface> model,  string schema) -> void
     {
-        var container;
+        let this->schemas[get_class_lower(model)] = schema;
+    }
+
+    /**
+     * Sets the mapped source for a model
+     */
+    public function setModelSource(<ModelInterface> model,  string source) -> void
+    {
+        let this->sources[get_class_lower(model)] = source;
+    }
+
+    /**
+     * Sets read connection service for a model
+     */
+    public function setReadConnectionService(<ModelInterface> model, string connectionService) -> void
+    {
+        let this->readConnectionServices[get_class_lower(model)] = connectionService;
+    }
+
+    /**
+     * Stores a reusable record in the internal list
+     *
+     * @param ModelInterface $model
+     * @param string         $key
+     * @param mixed          $records
+     *
+     * @return void
+     */
+    public function setReusableRecords(string modelName, string key, var records) -> void
+    {
+        let this->reusable[key] = records;
+    }
+
+    /**
+     * Enables or disables sticky connections. When enabled, once a model has
+     * written to its write connection during the current request cycle, any
+     * further reads for that write service use the write connection.
+     */
+    public function setSticky(bool sticky) -> void
+    {
+        let this->sticky = sticky;
+    }
+
+    /**
+     * Sets write connection service for a model
+     */
+    public function setWriteConnectionService(<ModelInterface> model,  string connectionService) -> void
+    {
+        let this->writeConnectionServices[get_class_lower(model)] = connectionService;
+    }
+
+    /**
+     * Sets if a model must use dynamic update instead of the all-field update
+     */
+    public function useDynamicUpdate(<ModelInterface> model, bool dynamicUpdate) -> void
+    {
+        var entityName;
+
+        let entityName = get_class_lower(model),
+            this->dynamicUpdate[entityName] = dynamicUpdate,
+            this->keepSnapshots[entityName] = dynamicUpdate;
+    }
+
+    /**
+     * Returns the connection to read or write data related to a model
+     * depending on the connection services.
+     *
+     * @throws Exception
+     *
+     * @phpstan-param array<string, string> $connectionServices
+     */
+    protected function getConnection(
+        <ModelInterface> model,
+        array connectionServices
+    ) -> <AdapterInterface> {
+        var container, service, connection;
+
+        let service = this->getConnectionService(model, connectionServices);
 
         let container = <DiInterface> this->container;
 
         if unlikely typeof container != "object" {
-            throw new Exception(
-                Exception::containerServiceNotFound(
-                    "the services related to the ORM"
-                )
-            );
+            throw new ManagerOrmServicesUnavailable();
         }
 
         /**
-         * Gets Builder instance from DI container
+         * Request the connection service from the DI
          */
-        return <BuilderInterface> container->get(
-            "Phalcon\\Mvc\\Model\\Query\\Builder",
-            [
-                params,
-                container
-            ]
-        );
+        let connection = <AdapterInterface> container->getShared(service);
+
+        if unlikely typeof connection != "object" {
+            throw new InvalidConnectionService();
+        }
+
+        return connection;
     }
 
+    private function checkHasRelationship(
+        string collection,
+         string modelName,
+         string modelRelation
+    ) -> bool {
+        var entityName;
+        string keyRelation;
+
+        let entityName = strtolower(modelName);
+
+        /**
+         * Relationship unique key
+         */
+        let keyRelation = entityName . "$" . strtolower(modelRelation);
+
+        /**
+         * Initialize the model first
+         */
+        if !isset this->initialized[entityName] {
+            this->load(modelName);
+        }
+
+        return isset this->{collection}[keyRelation];
+    }
     /**
-     * Returns the last query created or executed in the models manager
+     * Counts the fields of a relation leg. A leg with one field is a string,
+     * so it counts as one field.
+     *
+     * @param mixed $fields
+     *
+     * @return int
      */
-    public function getLastQuery() -> <QueryInterface>
+    private function getFieldsCount(var fields) -> int
     {
-        return this->lastQuery;
+        if typeof fields == "array" {
+            return count(fields);
+        }
+
+        return 1;
     }
 
-    /**
-     * Destroys the current PHQL cache
-     */
-    public function __destruct()
-    {
-        phalcon_orm_destroy_cache();
-
-        Query::clean();
-    }
 }

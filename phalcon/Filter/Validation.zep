@@ -1,0 +1,817 @@
+
+/**
+ * This file is part of the Phalcon Framework.
+ *
+ * (c) Phalcon Team <team@phalcon.io>
+ *
+ * For the full copyright and license information, please view the
+ * LICENSE.txt file that was distributed with this source code.
+ */
+
+namespace Phalcon\Filter;
+
+use Phalcon\Contracts\Filter\FilterTypes;
+use Phalcon\Di\Di;
+use Phalcon\Di\DiInterface;
+use Phalcon\Di\Exception as DiException;
+use Phalcon\Di\Injectable;
+use Phalcon\Filter\FilterInterface;
+use Phalcon\Filter\Validation\AbstractCombinedFieldsValidator;
+use Phalcon\Filter\Validation\Exception as ValidationException;
+use Phalcon\Filter\Validation\Exceptions\FilterServiceUnavailable;
+use Phalcon\Filter\Validation\Exceptions\InvalidFieldType;
+use Phalcon\Filter\Validation\Exceptions\InvalidFilterService;
+use Phalcon\Filter\Validation\Exceptions\InvalidValidationData;
+use Phalcon\Filter\Validation\Exceptions\InvalidValidator;
+use Phalcon\Filter\Validation\Exceptions\InvalidValidatorScope;
+use Phalcon\Filter\Validation\Exceptions\NoDataToValidate;
+use Phalcon\Filter\Validation\Exceptions\NoValidators;
+use Phalcon\Filter\Validation\Exceptions\ValidationEntityNotObject;
+use Phalcon\Filter\Validation\ValidationInterface;
+use Phalcon\Filter\Validation\ValidatorInterface;
+use Phalcon\Messages\MessageInterface;
+use Phalcon\Messages\Messages;
+
+/**
+ * Allows to validate data using custom or built-in validators
+ *
+ * @phpstan-import-type filter_sanitizers from FilterTypes
+ * @phpstan-import-type filter_validation_combined_validators from FilterTypes
+ * @phpstan-import-type filter_validation_data from FilterTypes
+ * @phpstan-import-type filter_validation_default_messages from FilterTypes
+ * @phpstan-import-type filter_validation_filters from FilterTypes
+ * @phpstan-import-type filter_validation_labels from FilterTypes
+ * @phpstan-import-type filter_validation_validators from FilterTypes
+ * @phpstan-import-type filter_validation_values from FilterTypes
+ * @phpstan-import-type filter_validation_whitelist from FilterTypes
+ * @phpstan-import-type filter_validators from FilterTypes
+ */
+class Validation extends Injectable implements ValidationInterface
+{
+    /**
+     * Default messages for validators, keyed by validator class name
+     *
+     * Declared without an array initializer on purpose: an initialized static
+     * array makes Zephir emit a zephir_init_static_properties() function that
+     * fails to compile in the single-file build. It is null until first set
+     * and treated as an empty array by the accessors below.
+     *
+     * @phpstan-var filter_validation_default_messages
+     */
+    protected static defaultMessages = [];
+
+    /**
+     * @phpstan-var filter_validation_combined_validators
+     */
+    protected array combinedFieldsValidators = [];
+
+    /**
+     * @phpstan-var filter_validation_data
+     */
+    protected data;
+
+    /**
+     * @var object|null
+     */
+    protected entity = null;
+
+    /**
+     * @phpstan-var filter_validation_filters
+     */
+    protected array filters = [];
+
+    /**
+     * @phpstan-var filter_validation_labels
+     */
+    protected array labels = [];
+
+    protected <Messages> messages;
+
+    /**
+     * List of validators
+     *
+     * @phpstan-var filter_validation_validators
+     */
+    protected array validators = [];
+
+    /**
+     * Calculated values
+     *
+     * @phpstan-var filter_validation_values
+     */
+    protected array values = [];
+
+    /**
+     * @phpstan-var filter_validation_whitelist
+     */
+    protected array whitelist = [];
+
+    /**
+     * Phalcon\Filter\Validation constructor
+     *
+     * @phpstan-param filter_validation_validators $validators
+     */
+    public function __construct(array validators = [])
+    {
+        let this->messages = new Messages();
+
+        let this->validators = array_filter(
+            validators,
+            function(var element) {
+                return typeof element[0] != "array" || !(element[1] instanceof AbstractCombinedFieldsValidator);
+            }
+        );
+
+        let this->combinedFieldsValidators = array_filter(
+            validators,
+            function(var element) {
+                return typeof element[0] == "array" && element[1] instanceof AbstractCombinedFieldsValidator;
+            }
+        );
+
+        /**
+         * Check for an 'initialize' method
+         */
+        if method_exists(this, "initialize") {
+            this->{"initialize"}();
+        }
+    }
+
+    /**
+     * Returns the default message registered for a validator class, or an
+     * empty string when none has been registered.
+     */
+    public static function getDefaultMessage(string validatorClassName) -> string
+    {
+        var defaultMessage;
+
+        if fetch defaultMessage, self::defaultMessages[validatorClassName] {
+            return defaultMessage;
+        }
+
+        return "";
+    }
+
+    /**
+     * Registers default messages for validators, keyed by validator class
+     * name. A registered default is used when a validator does not define its
+     * own message; a message set on the validator instance still wins. Calls
+     * are merged, so defaults can be registered incrementally.
+     *
+     * @phpstan-param filter_validation_default_messages $messages
+     *
+     * @phpstan-return filter_validation_default_messages
+     */
+    public static function setDefaultMessages(array messages = []) -> array
+    {
+        var localMessages;
+
+        let localMessages = self::defaultMessages;
+
+        let self::defaultMessages = array_merge(localMessages, messages);
+
+        return self::defaultMessages;
+    }
+
+    /**
+     * Adds a validator to a field
+     *
+     * @param array|string $field
+     *
+     * @phpstan-param mixed $field
+     *
+     * @phpstan-return static
+     * @throws ValidationException
+     */
+    public function add(var field, <ValidatorInterface> validator) -> <static>
+    {
+        var singleField;
+
+        if typeof field === "array" {
+            // Uniqueness validator for combination of fields is handled differently
+            if validator instanceof AbstractCombinedFieldsValidator {
+                let this->combinedFieldsValidators[] = [field, validator];
+            } else {
+                for singleField in field {
+                    let this->validators[singleField][] = validator;
+                }
+            }
+        } elseif typeof field == "string" {
+            let this->validators[field][] = validator;
+        } else {
+            throw new InvalidFieldType();
+        }
+
+        return this;
+    }
+
+    /**
+     * Appends a message to the messages list
+     */
+    public function appendMessage(<MessageInterface> message) -> <static>
+    {
+        this->messages->appendMessage(message);
+
+        return this;
+    }
+
+    /**
+     * Assigns the data to an entity
+     * The entity is used to obtain the validation values
+     *
+     * ```php
+     * $entity = new Author();
+     * $fields = ['name', 'email', 'imageUrl'];
+     * $validation = new AuthorValidation();
+     * $validation->bind($entity, $_POST, $fields);
+     * $validation->validate();
+     * ```
+     *
+     * @param object $entity
+     *
+     * @phpstan-param mixed                       $entity
+     * @phpstan-param filter_validation_data      $data
+     * @phpstan-param filter_validation_whitelist $whitelist
+     */
+    public function bind(var entity, var data, array whitelist = []) -> <static>
+    {
+        var container, field, value, fieldFilters, filterService, filters, method;
+
+        let this->data = data;
+        this->setEntity(entity);
+
+        // if data is not an array / object, entity is null, or data is empty, then no need to proceed further
+        if unlikely (typeof data != "array" && typeof data != "object") || (null === entity) || empty data {
+            return this;
+        }
+
+        let container = this->getDI();
+        if container === null {
+            let container = Di::getDefault();
+
+            if container === null {
+                throw new FilterServiceUnavailable();
+            }
+        }
+        let filterService = <FilterInterface> container->getShared("filter");
+        if unlikely typeof filterService != "object" {
+            throw new InvalidFilterService();
+        }
+
+        if empty whitelist {
+            let whitelist = this->whitelist;
+        }
+
+        let filters = this->filters;
+
+        for field, value in data {
+            /**
+             * Skip numeric (integer) keys; entity setters and properties are
+             * always string-named, so camelize() would fail on them. See
+             * cphalcon issue #17173.
+             */
+            if typeof field != "string" {
+                continue;
+            }
+
+            /**
+             * Check if the field is in the whitelist
+             */
+            if !empty whitelist && !in_array(field, whitelist) {
+                continue;
+            }
+
+            if fetch fieldFilters, filters[field] {
+                let value = filterService->sanitize(value, fieldFilters);
+            }
+            /**
+             * Set value in entity
+             */
+            let method = "set" . camelize(field);
+
+            if method_exists(this->entity, method) {
+                entity->{method}(value);
+            } elseif method_exists(this->entity, "writeAttribute") {
+                entity->writeAttribute(field, value);
+            } elseif property_exists(this->entity, field) {
+                let entity->{field} = value;
+            }
+        }
+
+        return this;
+    }
+
+    /**
+     * Verify if validation fails by verifying if there are messages in the current validation
+     */
+    public function fails() -> bool
+    {
+        if this->messages->count() > 0 {
+            return true;
+        }
+
+        return false;
+    }
+
+    public function getData() -> var
+    {
+        return this->data;
+    }
+
+    /**
+     * Returns the bound entity
+     *
+     * @return object
+     *
+     * @phpstan-return object|null
+     */
+    public function getEntity() -> var
+    {
+        return this->entity;
+    }
+
+    /**
+     * Returns all the filters or a specific one
+     */
+    public function getFilters(string field = null) -> var | null
+    {
+        var filters, fieldFilters;
+
+        let filters = this->filters;
+
+        if !field {
+            return filters;
+        }
+
+        if !fetch fieldFilters, filters[field] {
+            return null;
+        }
+
+        return fieldFilters;
+    }
+
+    /**
+     * Get label for field
+     *
+     * @param array|string $field
+     *
+     * @phpstan-param mixed $field
+     */
+    public function getLabel(var field) -> string
+    {
+        var labels, value;
+
+        let labels = this->labels;
+
+        if typeof field == "array" {
+            return join(", ", field);
+        }
+
+        if fetch value, labels[field] {
+            return value;
+        }
+
+        return field;
+    }
+
+    /**
+     * Returns the registered validators
+     */
+    public function getMessages() -> <Messages>
+    {
+        return this->messages;
+    }
+
+    /**
+     * Returns the validators added to the validation
+     *
+     * @phpstan-return filter_validation_validators
+     */
+    public function getValidators() -> array
+    {
+        return this->validators;
+    }
+
+    /**
+     * Gets the value to validate in the array/object data source
+     *
+     * @throws ValidationException
+     * @throws DiException
+     */
+    public function getValue(string field) -> var | null
+    {
+        var entity, method, value, data, filters, fieldFilters,
+            container, filterService;
+        bool isRawFetched;
+
+        let isRawFetched = false;
+        let entity = this->entity;
+        let data = this->data;
+
+        //  If the entity is an object use it to retrieve the values
+        if typeof entity == "object" {
+            let value = this->getValueByEntity(entity, field);
+            if value === null {
+                let isRawFetched = true;
+                let value = this->getValueByData(data, field);
+            }
+        } else {
+            if unlikely (typeof data != "array" && typeof data != "object") {
+                throw new NoDataToValidate();
+            }
+            let value = this->getValueByData(data, field);
+        }
+
+        if value === null {
+            return null;
+        }
+
+        let filters = this->filters;
+
+        if fetch fieldFilters, filters[field] {
+            if fieldFilters {
+                let container = this->getDI();
+
+                if container === null {
+                    let container = Di::getDefault();
+
+                    if container === null {
+                        throw new FilterServiceUnavailable();
+                    }
+                }
+
+                let filterService = <FilterInterface> container->getShared("filter");
+
+                if unlikely typeof filterService != "object" {
+                    throw new InvalidFilterService();
+                }
+
+                let value = filterService->sanitize(value, fieldFilters);
+
+                /**
+                 * Set filtered value in entity
+                 */
+                if typeof entity == "object" && isRawFetched === false {
+                    let method = "set" . camelize(field);
+
+                    if method_exists(entity, method) {
+                        entity->{method}(value);
+                    } elseif method_exists(entity, "writeAttribute") {
+                        entity->writeAttribute(field, value);
+                    } elseif property_exists(entity, field) {
+                        let entity->{field} = value;
+                    }
+                }
+
+                return value;
+            }
+        }
+
+        // Cache the calculated value only if it's not entity
+        if typeof entity != "object" {
+            let this->values[field] = value;
+        }
+
+        return value;
+    }
+
+    /**
+     * Gets the value to validate in the array/object data source
+     */
+    public function getValueByData(var data, string field) -> var | null
+    {
+        var value, values;
+
+        // Check if there is a calculated value
+        let values = this->values;
+
+        if fetch value, values[field] {
+            return value;
+        }
+
+        if typeof data === "array" {
+            if isset data[field] {
+                return data[field];
+            }
+        }
+
+        if typeof data === "object" {
+            if isset data->{field} {
+                return data->{field};
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Gets the value to validate in the object entity source
+     */
+    public function getValueByEntity(var entity, string field) -> var | null
+    {
+        string method;
+
+        let method = "get" . camelize(field);
+
+        if method_exists(entity, method) {
+            return entity->{method}();
+        }
+
+        if method_exists(entity, "readAttribute") {
+            return entity->readAttribute(field);
+        }
+
+        if isset entity->{field} {
+            return entity->{field};
+        }
+
+        return null;
+    }
+
+    /**
+     * Alias of `add` method
+     *
+     * @param array|string $field
+     *
+     * @phpstan-param mixed $field
+     *
+     * @todo remove this
+     */
+    public function rule(var field, <ValidatorInterface> validator) -> <static>
+    {
+        return this->add(field, validator);
+    }
+
+    /**
+     * Adds the validators to a field
+     *
+     * @phpstan-param filter_validators $validators
+     */
+    public function rules(var field,  array validators) -> <static>
+    {
+        var validator;
+
+        for validator in validators {
+            if validator instanceof ValidatorInterface {
+                this->add(field, validator);
+            }
+        }
+
+        return this;
+    }
+
+    /**
+     * Sets the bound entity
+     *
+     * @param object $entity
+     */
+    public function setEntity(entity) -> void
+    {
+        if unlikely typeof entity != "object" {
+            throw new ValidationEntityNotObject();
+        }
+
+        let this->entity = entity;
+    }
+
+    /**
+     * Adds filters to the field
+     *
+     * @param array|string $field
+     * @param array|string $filters
+     *
+     * @phpstan-param mixed $field
+     * @phpstan-param mixed $filters
+     */
+    public function setFilters(var field, filters) -> <static>
+    {
+        var singleField;
+
+        if typeof field == "array" {
+            for singleField in field {
+                let this->filters[singleField] = filters;
+            }
+        } elseif typeof field == "string" {
+            let this->filters[field] = filters;
+        } else {
+            throw new InvalidFieldType();
+        }
+
+        return this;
+    }
+
+    /**
+     * Adds labels for fields
+     *
+     * @phpstan-param filter_validation_labels $labels
+     */
+    public function setLabels(array labels) -> void
+    {
+        let this->labels = labels;
+    }
+
+    /**
+     * Sets the validator array
+     *
+     * @phpstan-param filter_validation_validators $validators
+     */
+    public function setValidators(array validators) -> <static>
+    {
+        let this->validators = validators;
+
+        return this;
+    }
+
+    /**
+     * Validate a set of data according to a set of rules
+     *
+     * You can use $validation->bind(entity, data, whitelist)->validate()
+     * When you use bind(), the this->data is already set, so you can reuse it here
+     *
+     * ```php
+     * // using bind() with $whitelist fields
+     * $entity = new Author();
+     * $fields = ['name', 'email', 'imageUrl'];
+     * $validation = new AuthorValidation();
+     * $validation->bind($entity, $_POST, $fields);
+     * $validation->validate();
+     *
+     * // directly using validate
+     * $validation = new AuthorValidation();
+     * $validation->validate($_POST, $entity, $fields);
+     * ```
+     *
+     * @param array|object $data
+     *
+     * @phpstan-param mixed $data
+     * @phpstan-param object $entity
+     * @phpstan-param filter_validation_whitelist $whitelist
+     *
+     * @return false|Messages
+     */
+    public function validate(var data = null, var entity = null, array whitelist = []) -> <Messages> | bool
+    {
+        var combinedFieldsValidators, field, scope, status, validator,
+            validatorData, validators, inputData = null;
+
+        let validatorData            = this->validators,
+            combinedFieldsValidators = this->combinedFieldsValidators;
+
+        if unlikely typeof validatorData != "array" {
+            throw new NoValidators();
+        }
+
+        /**
+         * Clear pre-calculated values
+         */
+        let this->values = [];
+
+        /**
+         * Implicitly creates a Phalcon\Messages\Messages object
+         */
+        let this->messages = new Messages();
+        if (data !== null) {
+            // if data is provided
+            if unlikely typeof data != "array" && typeof data != "object" {
+                throw new InvalidValidationData();
+            }
+            let this->data = data;
+            let inputData = data;
+        } elseif !empty this->data {
+            // else, if data === null, but we have this->data from bind(), reuse this->data
+            let inputData = this->data;
+        }
+
+        if entity !== null {
+            // if user provided entity, bind and assign the data to the entity
+            this->bind(entity, inputData, whitelist);
+        }
+
+        /**
+         * Validation classes can implement the 'beforeValidation' callback
+         */
+        if method_exists(this, "beforeValidation") {
+            let status = this->{"beforeValidation"}(inputData, this->entity, this->messages);
+
+            if status === false {
+                return status;
+            }
+        }
+
+        for field, validators in validatorData {
+            for validator in validators {
+                if unlikely typeof validator != "object" {
+                    throw new InvalidValidator();
+                }
+
+                /**
+                 * Call internal validations, if it returns true, then skip the
+                 * current validator
+                 */
+                if this->preChecking(field, validator) {
+                    continue;
+                }
+
+                /**
+                 * Check if the validation must be canceled if this validator fails
+                 */
+                if validator->validate(this, field) === false {
+                    if validator->getOption("cancelOnFail") {
+                        break;
+                    }
+                }
+            }
+        }
+
+        for scope in combinedFieldsValidators {
+            if unlikely typeof scope != "array" {
+                throw new InvalidValidatorScope();
+            }
+
+            let field     = scope[0],
+                validator = scope[1];
+
+            if unlikely typeof validator != "object" {
+                throw new InvalidValidator();
+            }
+
+            /**
+             * Call internal validations, if it returns true, then skip the
+             * current validator
+             */
+            if this->preChecking(field, validator) {
+                continue;
+            }
+
+            /**
+             * Check if the validation must be canceled if this validator fails
+             */
+            if validator->validate(this, field) === false {
+                if validator->getOption("cancelOnFail") {
+                    break;
+                }
+            }
+        }
+
+        /**
+         * Get the messages generated by the validators
+         */
+        if method_exists(this, "afterValidation") {
+            this->{"afterValidation"}(inputData, this->entity, this->messages);
+        }
+
+        return this->messages;
+    }
+
+    /**
+     * Internal validations, if it returns true, then skip the current validator
+     *
+     * @param array|string $field
+     * @param ValidatorInterface $validator
+     *
+     * @phpstan-param mixed $field
+     */
+    protected function preChecking(var field, <ValidatorInterface> validator) -> bool
+    {
+        var singleField, allowEmpty, value;
+        array results = [];
+
+        if typeof field == "array" {
+            for singleField in field {
+                let results[] = this->preChecking(singleField, validator);
+
+                if in_array(false, results) {
+                    return false;
+                }
+
+                return true;
+            }
+        } else {
+            let allowEmpty = validator->getOption("allowEmpty", false);
+
+            if allowEmpty {
+                /**
+                 * The `allowEmpty` rule is owned by the validator
+                 * (AbstractValidator::isAllowEmpty() or an override)
+                 */
+                if method_exists(validator, "isAllowEmpty") {
+                    return validator->isAllowEmpty(this, field);
+                }
+
+                /**
+                 * Compatibility path for validators implementing
+                 * ValidatorInterface without extending AbstractValidator
+                 */
+                let value = this->getValue(field);
+
+                if typeof allowEmpty == "array" {
+                    return in_array(value, allowEmpty, true);
+                }
+
+                return empty value;
+            }
+        }
+
+        return false;
+    }
+}

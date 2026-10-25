@@ -6,32 +6,99 @@
  *
  * For the full copyright and license information, please view the LICENSE.txt
  * file that was distributed with this source code.
+ *
+ * Implementation of this file has been influenced by AuraPHP
+ * @link    https://github.com/auraphp/Aura.Html
+ * @license https://github.com/auraphp/Aura.Html/blob/2.x/LICENSE
  */
 
 namespace Phalcon\Html;
 
-use Phalcon\Support\Collection;
 use Phalcon\Html\Attributes\RenderInterface;
-use Phalcon\Tag;
+use Phalcon\Html\Escaper\AttributeEscaper;
+use Phalcon\Html\Exceptions\AttributeNotRenderable;
+use Phalcon\Support\Collection;
 
 /**
  * This class helps to work with HTML Attributes
+ *
+ * @extends Collection<mixed>
  */
 class Attributes extends Collection implements RenderInterface
 {
-    /**
-     * Render attributes as HTML attributes
-     */
-    public function render() -> string
-    {
-        return Tag::renderAttributes("", this->toArray());
-    }
-
     /**
      * Alias of the render method
      */
     public function __toString() -> string
     {
         return this->render();
+    }
+
+    /**
+     * Render attributes as HTML attributes
+     */
+    public function render() -> string
+    {
+        return this->renderAttributes(this->toArray());
+    }
+
+    /**
+     * @todo remove this when we refactor forms. Maybe remove this class? Put it into traits
+     *
+     * @phpstan-param array<array-key, mixed> $attributes
+     */
+    protected function renderAttributes(array attributes) -> string
+    {
+        var escaper, intersect, key, result, results, value;
+        array order;
+
+        let order = [
+            "rel"    : null,
+            "type"   : null,
+            "for"    : null,
+            "src"    : null,
+            "href"   : null,
+            "action" : null,
+            "id"     : null,
+            "name"   : null,
+            "value"  : null,
+            "class"  : null
+        ];
+
+        let intersect = array_intersect_key(order, attributes),
+            results   = array_merge(intersect, attributes);
+
+        /**
+         * Just in case remove the "escape" attribute
+         */
+        unset results["escape"];
+
+        /**
+         * Escape values through the configurable AttributeEscaper so a single
+         * implementation owns attribute escaping. ENT_QUOTES reproduces the
+         * previous hardcoded htmlspecialchars() call byte for byte - the
+         * "utf-8" encoding and double-encode defaults already match.
+         */
+        let escaper = new AttributeEscaper();
+        escaper->setFlags(ENT_QUOTES);
+
+        let result = "";
+        for key, value in results {
+            if typeof key === "string" && null !== value {
+                if (typeof value === "array" || is_resource(value)) {
+                    throw new AttributeNotRenderable(key, gettype(value));
+                }
+
+                let key = escaper->escape(
+                    (string) preg_replace("~[\\s/=]~", "", key)
+                );
+
+                let result .= key . "=\""
+                . escaper->escape(value)
+                . "\" ";
+            }
+        }
+
+        return result;
     }
 }

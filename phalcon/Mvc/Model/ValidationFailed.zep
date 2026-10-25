@@ -11,6 +11,7 @@
 namespace Phalcon\Mvc\Model;
 
 use Phalcon\Messages\Message;
+use Phalcon\Messages\MessageInterface;
 use Phalcon\Mvc\ModelInterface;
 
 /**
@@ -21,27 +22,23 @@ use Phalcon\Mvc\ModelInterface;
  */
 class ValidationFailed extends Exception
 {
-    /**
-     * @var array
-     */
-    protected messages = [];
+    protected <ModelInterface> model;
 
-    /**
-     * @var ModelInterface
-     */
-    protected model;
+    protected array validationMessages = [];
 
     /**
      * Phalcon\Mvc\Model\ValidationFailed constructor
      *
      * @param ModelInterface model
      * @param Message[] validationMessages
+     *
+     * @phpstan-param list<MessageInterface> $validationMessages
      */
-    public function __construct(<ModelInterface> model, array! validationMessages)
+    public function __construct(<ModelInterface> model,  array validationMessages)
     {
         var messageStr, message;
 
-        if count(validationMessages) > 0 {
+        if !empty validationMessages {
             /**
              * Get the first message in the array
              */
@@ -56,17 +53,19 @@ class ValidationFailed extends Exception
         }
 
         let this->model = model;
-        let this->messages = validationMessages;
+        let this->validationMessages = validationMessages;
 
         parent::__construct(messageStr);
     }
 
     /**
      * Returns the complete group of messages produced in the validation
+     *
+     * @phpstan-return list<MessageInterface>
      */
     public function getMessages() -> <Message[]>
     {
-        return this->messages;
+        return this->validationMessages;
     }
 
     /**

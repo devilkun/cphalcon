@@ -27,50 +27,46 @@ class Payload implements PayloadInterface
 {
     /**
      * Exception if any
-     *
-     * @var Throwable|null
      */
-    protected exception = null;
+    protected ?<Throwable> exception = null;
 
     /**
      * Extra information
      *
      * @var mixed
      */
-    protected extras { get };
+    protected extras;
 
     /**
      * Input
      *
      * @var mixed
      */
-    protected input { get };
+    protected input;
 
     /**
      * Messages
      *
      * @var mixed
      */
-    protected messages { get };
-
-    /**
-     * Status
-     *
-     * @var mixed
-     */
-    protected status { get };
+    protected messages;
 
     /**
      * Output
      *
      * @var mixed
      */
-    protected output { get };
+    protected output;
+
+    /**
+     * Status
+     *
+     * @var mixed
+     */
+    protected status;
 
     /**
      * Gets the potential exception thrown in the domain layer
-     *
-     * @return Throwable|null
      */
     public function getException() -> <Throwable> | null
     {
@@ -78,11 +74,51 @@ class Payload implements PayloadInterface
     }
 
     /**
+     * Extra information
+     */
+    public function getExtras() -> var
+    {
+        return this->extras;
+    }
+
+    /**
+     * Input
+     */
+    public function getInput() -> var
+    {
+        return this->input;
+    }
+
+    /**
+     * Messages
+     */
+    public function getMessages() -> var
+    {
+        return this->messages;
+    }
+
+    /**
+     * Output
+     */
+    public function getOutput() -> var
+    {
+        return this->output;
+    }
+
+    /**
+     * Status
+     *
+     * Status values are drawn from the `Status` vocabulary.
+     *
+     * @see Status
+     */
+    public function getStatus() -> var
+    {
+        return this->status;
+    }
+
+    /**
      * Sets an exception thrown in the domain
-     *
-     * @param Throwable $exception
-     *
-     * @return PayloadInterface
      */
     public function setException(<Throwable> exception) -> <PayloadInterface>
     {
@@ -133,6 +169,10 @@ class Payload implements PayloadInterface
 
     /**
      * Sets the payload status.
+     *
+     * Status values are drawn from the `Status` vocabulary.
+     *
+     * @see Status
      */
     public function setStatus(var status) -> <PayloadInterface>
     {

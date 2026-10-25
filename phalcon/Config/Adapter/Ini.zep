@@ -12,7 +12,9 @@ namespace Phalcon\Config\Adapter;
 
 use Phalcon\Config\Config;
 use Phalcon\Config\Exception;
-use Phalcon\Support\Traits\PhpFileTrait;
+use Phalcon\Config\Exceptions\CannotLoadConfigFile;
+use Phalcon\Contracts\Config\ConfigTypes;
+use Phalcon\Traits\Php\IniTrait;
 
 /**
  * Reads ini files and converts them to Phalcon\Config\Config objects.
@@ -55,9 +57,13 @@ use Phalcon\Support\Traits\PhpFileTrait;
  *     INI_SCANNER_NORMAL
  * );
  * ```
+ *
+ * @phpstan-import-type config_data from ConfigTypes
  */
 class Ini extends Config
 {
+    use IniTrait;
+
     /**
      * Ini constructor.
      *
@@ -74,9 +80,7 @@ class Ini extends Config
         let iniConfig = this->phpParseIniFile(filePath, true, mode);
 
         if unlikely iniConfig === false {
-            throw new Exception(
-                "Configuration file " . basename(filePath) . " cannot be loaded"
-            );
+            throw new CannotLoadConfigFile(basename(filePath));
         }
 
         let config = [];
@@ -92,7 +96,7 @@ class Ini extends Config
                     );
                 }
 
-                if count(sections) {
+                if !empty sections {
                     let config[section] = call_user_func_array(
                         "array_replace_recursive",
                         sections
@@ -112,11 +116,17 @@ class Ini extends Config
      * We have to cast values manually because parse_ini_file() has a poor
      * implementation.
      *
+     * Note: this casting is an ini-format compensation and is deliberately
+     * specific to this adapter. Ini files carry untyped strings, so
+     * `on/yes/true`, `off/no/false`, `null` and numeric strings are decoded
+     * here. The json, yaml and php adapters receive natively typed values
+     * from their parsers and perform no casting.
+     *
      * @param mixed $ini
      *
-     * @return array|float|int|mixed|string|null
+     * @return mixed
      */
-    protected function cast(var ini) -> bool | null | double | int | string
+    protected function cast(var ini) -> mixed
     {
         var lowerIni;
         array castMap;
@@ -148,7 +158,7 @@ class Ini extends Config
         }
 
         // Decode float/int
-        if typeof ini === "string" && is_numeric(ini) {
+        if is_numeric(ini) {
             if preg_match("/[.]+/", ini) {
                 return (double) ini;
             }
@@ -178,17 +188,16 @@ class Ini extends Config
     /**
      * Build multidimensional array from string
      *
-     * @param string $path
-     * @param mixed  $value
+     * @param mixed $value
      *
-     * @return array
+     * @phpstan-return config_data
      */
     protected function parseIniString(string path, var value) -> array
     {
         var castValue, key, position, result;
 
         let castValue = this->cast(value),
-            position  = strpos(path, ".");
+            position  = strpos(path, Config::DEFAULT_PATH_DELIMITER);
 
         if false === position {
             return [
@@ -203,16 +212,5 @@ class Ini extends Config
         return [
             key : result
         ];
-    }
-
-    /**
-     * @todo to be removed when we get traits
-     */
-    protected function phpParseIniFile(
-        string filename,
-        bool processSections = false,
-        int scannerMode = 1
-    ) {
-        return parse_ini_file(filename, processSections, scannerMode);
     }
 }

@@ -10,6 +10,8 @@
 
 namespace Phalcon\Annotations;
 
+use Phalcon\Contracts\Annotations\AnnotationsTypes;
+
 /**
  * Allows to manipulate the annotations reflection in an OO manner
  *
@@ -27,34 +29,47 @@ namespace Phalcon\Annotations;
  * // Get the annotations in the class docblock
  * $classAnnotations = $reflection->getClassAnnotations();
  *```
+ *
+ * @phpstan-import-type annotations_collection_map from AnnotationsTypes
+ * @phpstan-import-type annotations_reflection_data from AnnotationsTypes
  */
 class Reflection
 {
     /**
-     * @var array
-     * TODO: Make always array
+     * @var Collection|null
      */
-    protected classAnnotations;
+    protected classAnnotations = null;
 
     /**
      * @var array
-     * TODO: Make always array
+     *
+     * @phpstan-var annotations_collection_map
      */
-    protected methodAnnotations;
+    protected constantAnnotations = [];
 
     /**
      * @var array
-     * TODO: Make always array
+     *
+     * @phpstan-var annotations_collection_map
      */
-    protected propertyAnnotations;
+    protected propertyAnnotations = [];
 
     /**
      * @var array
+     *
+     * @phpstan-var annotations_collection_map
+     */
+    protected methodAnnotations = [];
+
+    /**
+     * @var array
+     *
+     * @phpstan-var annotations_reflection_data
      */
     protected reflectionData = [];
 
     /**
-     * Phalcon\Annotations\Reflection constructor
+     * @phpstan-param annotations_reflection_data $reflectionData
      */
     public function __construct(array reflectionData = [])
     {
@@ -63,16 +78,16 @@ class Reflection
 
     /**
      * Returns the annotations found in the class docblock
+     *
+     * @return Collection|null
      */
-    public function getClassAnnotations() -> <Collection> | bool
+    public function getClassAnnotations() -> <Collection> | null
     {
         var reflectionClass;
 
         if this->classAnnotations === null {
             if fetch reflectionClass, this->reflectionData["class"] {
                 let this->classAnnotations = new Collection(reflectionClass);
-            } else {
-                let this->classAnnotations = false;
             }
         }
 
@@ -80,64 +95,84 @@ class Reflection
     }
 
     /**
-     * Returns the annotations found in the methods' docblocks
+     * Returns the annotations found in the constants' docblocks
+     *
+     * @return Collection[]
+     *
+     * @phpstan-return annotations_collection_map
      */
-    public function getMethodsAnnotations() -> <Collection[]> | bool
+    public function getConstantsAnnotations() -> <Collection[]>
     {
-        var reflectionMethods, methodName, reflectionMethod;
+        var reflectionConstants, constant, reflectionConstant;
 
-        if this->methodAnnotations === null {
-            if fetch reflectionMethods, this->reflectionData["methods"] {
-                if count(reflectionMethods) {
-                    let this->methodAnnotations = [];
-
-                    for methodName, reflectionMethod in reflectionMethods {
-                        let this->methodAnnotations[methodName] = new Collection(
-                            reflectionMethod
-                        );
-                    }
-
-                    return this->methodAnnotations;
+        if fetch reflectionConstants, this->reflectionData["constants"] {
+            if typeof reflectionConstants === "array" && !empty reflectionConstants {
+                for constant, reflectionConstant in reflectionConstants {
+                    let this->constantAnnotations[constant] = new Collection(
+                        reflectionConstant
+                    );
                 }
             }
-
-            let this->methodAnnotations = false;
         }
 
-        return this->methodAnnotations;
+        return this->constantAnnotations;
     }
 
     /**
      * Returns the annotations found in the properties' docblocks
+     *
+     * @return Collection[]
+     *
+     * @phpstan-return annotations_collection_map
      */
-    public function getPropertiesAnnotations() -> <Collection[]> | bool
+    public function getPropertiesAnnotations() -> <Collection[]>
     {
         var reflectionProperties, property, reflectionProperty;
 
-        if this->propertyAnnotations === null {
-            if fetch reflectionProperties, this->reflectionData["properties"] {
-                if count(reflectionProperties) {
-                    let this->propertyAnnotations = [];
-
-                    for property, reflectionProperty in reflectionProperties {
-                        let this->propertyAnnotations[property] = new Collection(
-                            reflectionProperty
-                        );
-                    }
-
-                    return this->propertyAnnotations;
+        if fetch reflectionProperties, this->reflectionData["properties"] {
+            if typeof reflectionProperties === "array" && !empty reflectionProperties {
+                for property, reflectionProperty in reflectionProperties {
+                    let this->propertyAnnotations[property] = new Collection(
+                        reflectionProperty
+                    );
                 }
             }
-
-            let this->propertyAnnotations = false;
         }
 
         return this->propertyAnnotations;
     }
 
     /**
+     * Returns the annotations found in the methods' docblocks
+     *
+     * @return Collection[]
+     *
+     * @phpstan-return annotations_collection_map
+     */
+    public function getMethodsAnnotations() -> <Collection[]>
+    {
+        var reflectionMethods, methodName, reflectionMethod;
+
+        if fetch reflectionMethods, this->reflectionData["methods"] {
+            if typeof reflectionMethods === "array" && !empty reflectionMethods {
+                for methodName, reflectionMethod in reflectionMethods {
+                    let this->methodAnnotations[methodName] = new Collection(
+                        reflectionMethod
+                    );
+                }
+            }
+        }
+
+        return this->methodAnnotations;
+    }
+
+    /**
      * Returns the raw parsing intermediate definitions used to construct the
      * reflection
+     *
+     * @return array
+     *
+     * @phpstan-return annotations_reflection_data
      */
     public function getReflectionData() -> array
     {

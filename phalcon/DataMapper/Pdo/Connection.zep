@@ -14,8 +14,9 @@
 
 namespace Phalcon\DataMapper\Pdo;
 
-use InvalidArgumentException;
+use Phalcon\Contracts\DataMapper\DataMapperTypes;
 use Phalcon\DataMapper\Pdo\Connection\AbstractConnection;
+use Phalcon\DataMapper\Pdo\Exception\DriverNotSupported;
 use Phalcon\DataMapper\Pdo\Profiler\Profiler;
 use Phalcon\DataMapper\Pdo\Profiler\ProfilerInterface;
 
@@ -23,14 +24,17 @@ use Phalcon\DataMapper\Pdo\Profiler\ProfilerInterface;
  * Provides array quoting, profiling, a new `perform()` method, new `fetch*()`
  * methods
  *
- * @property array             $arguments
- * @property PDO               $pdo
- * @property ProfilerInterface $profiler
+ * @phpstan-import-type datamapper_connection_arguments from DataMapperTypes
+ * @phpstan-import-type datamapper_pdo_options from DataMapperTypes
+ * @phpstan-import-type datamapper_queries from DataMapperTypes
  */
 class Connection extends AbstractConnection
 {
     /**
      * @var array
+     *
+     * @phpstan-var datamapper_connection_arguments
+     * @psalm-suppress InvalidPropertyAssignmentValue
      */
     protected arguments = [];
 
@@ -46,6 +50,9 @@ class Connection extends AbstractConnection
      * @param array             $options
      * @param array             $queries
      * @param ProfilerInterface $profiler
+     *
+     * @phpstan-param datamapper_pdo_options $options
+     * @phpstan-param datamapper_queries     $queries
      */
     public function __construct(
         string dsn,
@@ -67,9 +74,7 @@ class Connection extends AbstractConnection
             ];
 
         if !isset available[parts[0]] {
-            throw new InvalidArgumentException(
-                "Driver not supported [" . parts[0] . "]"
-            );
+            throw new DriverNotSupported(parts[0]);
         }
 
 
@@ -98,6 +103,8 @@ class Connection extends AbstractConnection
      * The purpose of this method is to hide sensitive data from stack traces.
      *
      * @return array
+     *
+     * @phpstan-return array{arguments: datamapper_connection_arguments}
      */
     public function __debugInfo() -> array
     {
@@ -120,6 +127,8 @@ class Connection extends AbstractConnection
         var dsn, options, password, query, queries, username;
 
         if !this->pdo {
+            this->fireBefore(Events::BEFORE_CONNECT);
+
             // connect
             this->profiler->start(__FUNCTION__);
 
@@ -133,6 +142,8 @@ class Connection extends AbstractConnection
 
             this->profiler->finish();
 
+            this->fireManagerEvent(Events::AFTER_CONNECT, null, false);
+
             // connection-time queries
             for query in queries {
                 this->exec(query);
@@ -145,10 +156,14 @@ class Connection extends AbstractConnection
      */
     public function disconnect() -> void
     {
+        this->fireBefore(Events::BEFORE_DISCONNECT);
+
         this->profiler->start(__FUNCTION__);
 
         let this->pdo = null;
 
         this->profiler->finish();
+
+        this->fireManagerEvent(Events::AFTER_DISCONNECT, null, false);
     }
 }

@@ -22,6 +22,8 @@
  */
 /**
  * This interface must be implemented by adapters in Phalcon\Annotations
+ *
+ * @phpstan-import-type annotations_collection_map from AnnotationsTypes
  */
 ZEPHIR_INIT_CLASS(Phalcon_Annotations_Adapter_AdapterInterface)
 {
@@ -35,21 +37,35 @@ ZEPHIR_INIT_CLASS(Phalcon_Annotations_Adapter_AdapterInterface)
  */
 ZEPHIR_DOC_METHOD(Phalcon_Annotations_Adapter_AdapterInterface, get);
 /**
- * Returns the annotations found in a specific method
+ * Returns the annotations found in a specific constant
  */
-ZEPHIR_DOC_METHOD(Phalcon_Annotations_Adapter_AdapterInterface, getMethod);
+ZEPHIR_DOC_METHOD(Phalcon_Annotations_Adapter_AdapterInterface, getConstant);
 /**
- * Returns the annotations found in all the class' methods
+ * Returns the annotations found in all the class' constants
+ *
+ * @phpstan-return annotations_collection_map
  */
-ZEPHIR_DOC_METHOD(Phalcon_Annotations_Adapter_AdapterInterface, getMethods);
+ZEPHIR_DOC_METHOD(Phalcon_Annotations_Adapter_AdapterInterface, getConstants);
 /**
  * Returns the annotations found in a specific property
  */
 ZEPHIR_DOC_METHOD(Phalcon_Annotations_Adapter_AdapterInterface, getProperty);
 /**
  * Returns the annotations found in all the class' methods
+ *
+ * @phpstan-return annotations_collection_map
  */
 ZEPHIR_DOC_METHOD(Phalcon_Annotations_Adapter_AdapterInterface, getProperties);
+/**
+ * Returns the annotations found in a specific method
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Annotations_Adapter_AdapterInterface, getMethod);
+/**
+ * Returns the annotations found in all the class' methods
+ *
+ * @phpstan-return annotations_collection_map
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Annotations_Adapter_AdapterInterface, getMethods);
 /**
  * Returns the annotation reader
  */

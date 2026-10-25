@@ -10,7 +10,6 @@
 
 namespace Phalcon\Factory;
 
-class Exception extends \Phalcon\Exception
+class Exception extends \Exception
 {
-
 }

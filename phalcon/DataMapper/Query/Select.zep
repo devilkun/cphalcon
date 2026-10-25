@@ -10,52 +10,51 @@
  * Implementation of this file has been influenced by AtlasPHP
  *
  * @link    https://github.com/atlasphp/Atlas.Query
- * @license https://github.com/atlasphp/Atlas.Qyert/blob/1.x/LICENSE.md
+ * @license https://github.com/atlasphp/Atlas.Query/blob/1.x/LICENSE.md
  */
 
 namespace Phalcon\DataMapper\Query;
 
 use BadMethodCallException;
+use Phalcon\Contracts\DataMapper\DataMapperTypes;
+use Phalcon\DataMapper\Pdo\Exception\UnknownQueryMethod;
 
 /**
- * Class Select
+ * Select Query
  *
- * @property string $asAlias
- * @property bool   $forUpdate
+ * @phpstan-import-type datamapper_call_arguments from DataMapperTypes
+ * @phpstan-import-type datamapper_clauses from DataMapperTypes
+ * @phpstan-import-type datamapper_columns from DataMapperTypes
+ * @phpstan-import-type datamapper_select_store from DataMapperTypes
  *
- * @method int    fetchAffected()
- * @method array  fetchAll()
- * @method array  fetchAssoc()
- * @method array  fetchColumn(int $column = 0)
- * @method array  fetchGroup(int $flags = PDO::FETCH_ASSOC)
- * @method object fetchObject(string $class = 'stdClass', array $arguments = [])
- * @method array  fetchObjects(string $class = 'stdClass', array $arguments = [])
- * @method array  fetchOne()
- * @method array  fetchPairs()
- * @method mixed  fetchValue()
+ * @property datamapper_select_store $store
  */
 class Select extends AbstractConditions
 {
-    const JOIN_INNER   = "INNER";
-    const JOIN_LEFT    = "LEFT";
-    const JOIN_NATURAL = "NATURAL";
-    const JOIN_RIGHT   = "RIGHT";
-
     /**
      * @var string
      */
-    protected asAlias = "";
-
+    const JOIN_INNER   = "INNER";
     /**
-     * @var bool
+     * @var string
      */
-    protected forUpdate = false;
+    const JOIN_LEFT    = "LEFT";
+    /**
+     * @var string
+     */
+    const JOIN_NATURAL = "NATURAL";
+    /**
+     * @var string
+     */
+    const JOIN_RIGHT   = "RIGHT";
+
+    protected string asAlias = "";
+    protected bool forUpdate = false;
 
     /**
      * Proxied methods to the connection
      *
-     * @param string $method
-     * @param array  $params
+     * @phpstan-param datamapper_call_arguments $params
      *
      * @return mixed
      */
@@ -67,7 +66,7 @@ class Select extends AbstractConditions
             "fetchAffected" : true,
             "fetchAll"      : true,
             "fetchAssoc"    : true,
-            "fetchCol"      : true,
+            "fetchColumn"   : true,
             "fetchGroup"    : true,
             "fetchObject"   : true,
             "fetchObjects"  : true,
@@ -92,19 +91,11 @@ class Select extends AbstractConditions
             );
         }
 
-        throw new BadMethodCallException(
-            "Unknown method: [" . method . "]"
-        );
+        throw new UnknownQueryMethod(method);
     }
 
     /**
      * Sets a `AND` for a `HAVING` condition
-     *
-     * @param string     $condition
-     * @param mixed|null $value
-     * @param int        $type
-     *
-     * @return Select
      */
     public function andHaving(
         string condition,
@@ -117,27 +108,7 @@ class Select extends AbstractConditions
     }
 
     /**
-     * The `AS` statement for the query - useful in sub-queries
-     *
-     * @param string $asAlias
-     *
-     * @return Select
-     */
-    public function asAlias(string asAlias) -> <Select>
-    {
-        let this->asAlias = asAlias;
-
-        return this;
-    }
-
-    /**
      * Concatenates to the most recent `HAVING` clause
-     *
-     * @param string     $condition
-     * @param mixed|null $value
-     * @param int        $type
-     *
-     * @return Select
      */
     public function appendHaving(
         string condition,
@@ -151,12 +122,6 @@ class Select extends AbstractConditions
 
     /**
      * Concatenates to the most recent `JOIN` clause
-     *
-     * @param string     $condition
-     * @param mixed|null $value
-     * @param int        $type
-     *
-     * @return Select
      */
     public function appendJoin(
         string condition,
@@ -178,28 +143,42 @@ class Select extends AbstractConditions
     }
 
     /**
-     * The columns to select from. If a key is set in an array element, the
-     * key will be used as the alias
-     *
-     * @param string ...$column
-     *
-     * @return Select
+     * The `AS` statement for the query - useful in sub-queries
      */
-    public function columns() -> <Select>
+    public function asAlias(string asAlias) -> <Select>
     {
-        let this->store["COLUMNS"] = array_merge(
-            this->store["COLUMNS"],
-            func_get_args()
-        );
+        let this->asAlias = asAlias;
 
         return this;
     }
 
     /**
-     * @param bool $enable
+     * The columns to select from. If a key is set in the array element, the
+     * key will be used as the alias
      *
-     * @return Select
+     * @phpstan-param datamapper_columns $columns
      */
+    public function columns(array columns) -> <Select>
+    {
+        var key, value;
+        array localColumns = [];
+
+        for key, value in columns {
+            if is_int(key) {
+                let localColumns[] = value;
+            } else {
+                let localColumns[] = value . " AS " . key;
+            }
+        }
+
+        let this->store["COLUMNS"] = array_merge(
+            this->store["COLUMNS"],
+            localColumns
+        );
+
+        return this;
+    }
+
     public function distinct(bool enable = true) -> <Select>
     {
         this->setFlag("DISTINCT", enable);
@@ -208,25 +187,7 @@ class Select extends AbstractConditions
     }
 
     /**
-     * Adds table(s) in the query
-     *
-     * @param string $table
-     *
-     * @return Select
-     */
-    public function from(string table) -> <Select>
-    {
-        let this->store["FROM"][] = [table];
-
-        return this;
-    }
-
-    /**
      * Enable the `FOR UPDATE` for the query
-     *
-     * @param bool $enable
-     *
-     * @return Select
      */
     public function forUpdate(bool enable = true) -> <Select>
     {
@@ -236,9 +197,17 @@ class Select extends AbstractConditions
     }
 
     /**
+     * Adds table(s) in the query
+     */
+    public function from(string table) -> <Select>
+    {
+        let this->store["FROM"][] = [table];
+
+        return this;
+    }
+
+    /**
      * Returns the compiled SQL statement
-     *
-     * @return string
      */
     public function getStatement() -> string
     {
@@ -248,9 +217,7 @@ class Select extends AbstractConditions
     /**
      * Sets the `GROUP BY`
      *
-     * @param array|string $groupBy
-     *
-     * @return Select
+     * @phpstan-param datamapper_clauses|string $groupBy
      */
     public function groupBy(var groupBy) -> <Select>
     {
@@ -261,22 +228,14 @@ class Select extends AbstractConditions
 
     /**
      * Whether the query has columns or not
-     *
-     * @return bool
      */
     public function hasColumns() -> bool
     {
-        return count(this->store["COLUMNS"]) > 0;
+        return !empty this->store["COLUMNS"];
     }
 
     /**
      * Sets a `HAVING` condition
-     *
-     * @param string     $condition
-     * @param mixed|null $value
-     * @param int        $type
-     *
-     * @return Select
      */
     public function having(
         string condition,
@@ -290,14 +249,6 @@ class Select extends AbstractConditions
 
     /**
      * Sets a 'JOIN' condition
-     *
-     * @param string     $join
-     * @param string     $table
-     * @param string     $condition
-     * @param mixed|null $value
-     * @param int        $type
-     *
-     * @return Select
      */
     public function join(
         string join,
@@ -336,12 +287,6 @@ class Select extends AbstractConditions
 
     /**
      * Sets a `OR` for a `HAVING` condition
-     *
-     * @param string     $condition
-     * @param mixed|null $value
-     * @param int        $type
-     *
-     * @return Select
      */
     public function orHaving(
         string condition,
@@ -355,23 +300,17 @@ class Select extends AbstractConditions
 
     /**
      * Resets the internal collections
-     *
-     * @return Select
      */
-    public function reset() -> <Select>
+    public function reset() -> void
     {
         parent::reset();
 
         let this->asAlias   = "",
             this->forUpdate = false;
-
-        return this;
     }
 
     /**
      * Start a sub-select
-     *
-     * @return Select
      */
     public function subSelect() -> <Select>
     {
@@ -380,8 +319,6 @@ class Select extends AbstractConditions
 
     /**
      * Start a `UNION`
-     *
-     * @return Select
      */
     public function union() -> <Select>
     {
@@ -394,8 +331,6 @@ class Select extends AbstractConditions
 
     /**
      * Start a `UNION ALL`
-     *
-     * @return Select
      */
     public function unionAll() -> <Select>
     {
@@ -408,10 +343,6 @@ class Select extends AbstractConditions
 
     /**
      * Statement builder
-     *
-     * @param string $suffix
-     *
-     * @return string
      */
     protected function getCurrentStatement(string suffix = "") -> string
     {
@@ -443,8 +374,6 @@ class Select extends AbstractConditions
 
     /**
      * Builds the columns list
-     *
-     * @return string
      */
     private function buildColumns() -> string
     {
@@ -461,8 +390,6 @@ class Select extends AbstractConditions
 
     /**
      * Builds the from list
-     *
-     * @return string
      */
     private function buildFrom() -> string
     {

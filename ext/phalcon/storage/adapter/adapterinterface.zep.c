@@ -22,6 +22,14 @@
  */
 /**
  * Interface for Phalcon\Logger adapters
+ *
+ * @phpstan-import-type storage_keys from StorageTypes
+ *
+ * The adapter classes carry this member and the framework calls it on
+ * the interface. It joins the contract in the next major; until then the
+ * tag below records what all implementations provide.
+ *
+ * @method int getLifetime()
  */
 ZEPHIR_INIT_CLASS(Phalcon_Storage_Adapter_AdapterInterface)
 {
@@ -43,12 +51,13 @@ ZEPHIR_DOC_METHOD(Phalcon_Storage_Adapter_AdapterInterface, decrement);
  */
 ZEPHIR_DOC_METHOD(Phalcon_Storage_Adapter_AdapterInterface, delete);
 /**
+ * Deletes multiple data from the adapter
+ *
+ * @phpstan-param storage_keys $keys
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Storage_Adapter_AdapterInterface, deleteMultiple);
+/**
  * Reads data from the adapter
- *
- * @param string key
- * @param mixed|null defaultValue
- *
- * @return mixed
  */
 ZEPHIR_DOC_METHOD(Phalcon_Storage_Adapter_AdapterInterface, get);
 /**
@@ -58,6 +67,8 @@ ZEPHIR_DOC_METHOD(Phalcon_Storage_Adapter_AdapterInterface, get);
 ZEPHIR_DOC_METHOD(Phalcon_Storage_Adapter_AdapterInterface, getAdapter);
 /**
  * Returns all the keys stored
+ *
+ * @phpstan-return storage_keys
  */
 ZEPHIR_DOC_METHOD(Phalcon_Storage_Adapter_AdapterInterface, getKeys);
 /**
@@ -79,20 +90,13 @@ ZEPHIR_DOC_METHOD(Phalcon_Storage_Adapter_AdapterInterface, increment);
  * item has expired. If you need to set this key forever, you should use
  * the `setForever()` method.
  *
- * @param string                 $key
- * @param mixed                  $value
- * @param \DateInterval|int|null $ttl
+ * @param DateInterval|int|null $ttl
  *
  * @return bool
  */
 ZEPHIR_DOC_METHOD(Phalcon_Storage_Adapter_AdapterInterface, set);
 /**
- * Stores data in the adapter forever. The key needs to manually deleted
+ * Stores data in the adapter forever. The key needs to be manually deleted
  * from the adapter.
- *
- * @param string $key
- * @param mixed  $value
- *
- * @return bool
  */
 ZEPHIR_DOC_METHOD(Phalcon_Storage_Adapter_AdapterInterface, setForever);

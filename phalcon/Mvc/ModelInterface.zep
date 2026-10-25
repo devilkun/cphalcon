@@ -10,11 +10,14 @@
 
 namespace Phalcon\Mvc;
 
+use Phalcon\Contracts\Mvc\MvcTypes;
 use Phalcon\Db\Adapter\AdapterInterface;
 use Phalcon\Di\DiInterface;
 use Phalcon\Messages\MessageInterface;
 use Phalcon\Mvc\Model\CriteriaInterface;
 use Phalcon\Mvc\Model\MetaDataInterface;
+use Phalcon\Mvc\Model\ResultInterface;
+use Phalcon\Mvc\Model\Resultset;
 use Phalcon\Mvc\Model\ResultsetInterface;
 use Phalcon\Mvc\Model\TransactionInterface;
 
@@ -22,9 +25,135 @@ use Phalcon\Mvc\Model\TransactionInterface;
  * Phalcon\Mvc\ModelInterface
  *
  * Interface for Phalcon\Mvc\Model
+ *
+ * @template T
+ *
+ * @phpstan-import-type mvc_model_data from MvcTypes
+ * @phpstan-import-type mvc_model_parameters from MvcTypes
+ * @phpstan-import-type mvc_model_snapshot from MvcTypes
  */
 interface ModelInterface
 {
+    /**
+     * Allows to calculate the average value on a column matching the specified
+     * conditions
+     *
+     * @param array parameters
+     * @return ResultsetInterface|float
+     *
+     * @phpstan-param mvc_model_parameters $parameters
+     */
+    public static function average(array parameters = []) -> float | <ResultsetInterface>;
+
+    /**
+     * Assigns values to a model from an array returning a new model
+     *
+     * @phpstan-param mvc_model_data $data
+     */
+    public static function cloneResult(<ModelInterface> base,  array data, int dirtyState = 0) -> <ModelInterface>;
+
+    /**
+     * Assigns values to a model from an array returning a new model
+     *
+     * @param ModelInterface|\Phalcon\Mvc\Model\Row base
+     * @param mixed columnMap
+     * @param int dirtyState
+     * @param bool keepSnapshots
+     *
+     * @return ModelInterface
+     *
+     * @phpstan-param mvc_model_data $data
+     */
+    public static function cloneResultMap(
+        var base,
+         array data,
+        var columnMap,
+        int dirtyState = 0,
+        bool keepSnapshots = false
+    ) -> <ModelInterface>;
+
+    /**
+     * Returns an hydrated result based on the data and the column map
+     *
+     * @param array columnMap
+     *
+     * @phpstan-param mvc_model_data $data
+     */
+    public static function cloneResultMapHydrate(array data, var columnMap, int hydrationMode);
+
+    /**
+     * Allows to count how many records match the specified conditions
+     *
+     * Returns an integer for simple queries or a ResultsetInterface
+     * instance for when the GROUP condition is used. The results will
+     * contain the count of each group.
+     *
+     * @param array|string|null parameters
+     *
+     * @phpstan-param mvc_model_parameters $parameters
+     */
+    public static function count(var parameters = null) -> int | <ResultsetInterface>;
+
+    /**
+     * Allows to query a set of records that match the specified conditions.
+     *
+     * This is one of four ways to express a query against a model, each with an
+     * intended lane:
+     *
+     * - find-parameter arrays (this method) for simple lookups;
+     * - `Phalcon\Mvc\Model\Query\Builder` as the canonical programmatic API;
+     * - `Phalcon\Mvc\Model\Criteria` as request-bound convenience;
+     * - raw PHQL via `Phalcon\Mvc\Model\Query` for everything else.
+     *
+     * @param array|string|int|null parameters
+     *
+     * @return T[]|\Phalcon\Mvc\Model\Resultset<int, T>
+     */
+    public static function find(var parameters = null);
+
+    /**
+     * Allows to query the first record that match the specified conditions
+     *
+     * @param array parameters
+     * @return T|\Phalcon\Mvc\ModelInterface|\Phalcon\Mvc\Model\Row|null
+     *
+     * TODO: Current method signature must be reviewed in v5. As it must return only ?ModelInterface (it also returns Row).
+     * @see https://github.com/phalcon/cphalcon/issues/15212
+     * @see https://github.com/phalcon/cphalcon/issues/15883
+     */
+    public static function findFirst(parameters = null) -> var | null;
+
+    /**
+     * Allows to get the maximum value of a column that match the specified
+     * conditions
+     *
+     * @param array parameters
+     * @return mixed
+     */
+    public static function maximum(parameters = null) -> var;
+
+    /**
+     * Allows to get the minimum value of a column that match the specified
+     * conditions
+     *
+     * @param array parameters
+     * @return mixed
+     */
+    public static function minimum(parameters = null) -> var;
+
+    /**
+     * Create a criteria for a specific model
+     */
+    public static function query(<DiInterface> container = null) -> <CriteriaInterface>;
+
+    /**
+     * Allows to calculate a sum on a column that match the specified conditions
+     *
+     * @param array parameters
+     * @return float|ResultsetInterface
+     */
+    public static function sum(parameters = null) -> float | <ResultsetInterface>;
+
     /**
      * Appends a customized message on the validation process
      */
@@ -38,52 +167,10 @@ interface ModelInterface
      * @param mixed dataColumnMap Array to transform keys of data to another
      *
      * @return ModelInterface
-     */
-    public function assign(array! data, var whiteList = null, var dataColumnMap = null) -> <ModelInterface>;
-
-    /**
-     * Allows to calculate the average value on a column matching the specified
-     * conditions
      *
-     * @param array parameters
-     * @return ResultsetInterface|float
+     * @phpstan-param mvc_model_data $data
      */
-    public static function average(array parameters = []) -> float | <ResultsetInterface>;
-
-    /**
-     * Assigns values to a model from an array returning a new model
-     */
-    public static function cloneResult(<ModelInterface> base, array! data, int dirtyState = 0) -> <ModelInterface>;
-
-    /**
-     * Assigns values to a model from an array returning a new model
-     *
-     * @param ModelInterface|\Phalcon\Mvc\Model\Row base
-     * @param mixed columnMap
-     * @param int dirtyState
-     * @param bool keepSnapshots
-     *
-     * @return ModelInterface
-     */
-    public static function cloneResultMap(base, array! data, var columnMap, int dirtyState = 0, bool keepSnapshots = false) -> <ModelInterface>;
-
-    /**
-     * Returns an hydrated result based on the data and the column map
-     *
-     * @param array columnMap
-     */
-    public static function cloneResultMapHydrate(array! data, var columnMap, int hydrationMode);
-
-    /**
-     * Allows to count how many records match the specified conditions
-     *
-     * Returns an integer for simple queries or a ResultsetInterface
-     * instance for when the GROUP condition is used. The results will
-     * contain the count of each group.
-     *
-     * @param array|string|null parameters
-     */
-    public static function count(var parameters = null) -> int | <ResultsetInterface>;
+    public function assign(array data, var whiteList = null, var dataColumnMap = null) -> <ModelInterface>;
 
     /**
      * Inserts a model instance. If the instance already exists in the
@@ -98,37 +185,17 @@ interface ModelInterface
     public function delete() -> bool;
 
     /**
-     * Allows to query a set of records that match the specified conditions
-     *
-     * @param array|string|int|null parameters
-     *
-     * @return ResultsetInterface
-     */
-    public static function find(var parameters = null) -> <ResultsetInterface>;
-
-    /**
-     * Allows to query the first record that match the specified conditions
-     *
-     * @param array parameters
-     * @return \Phalcon\Mvc\ModelInterface|\Phalcon\Mvc\Model\Row|null
-     *
-     * TODO: Current method signature must be reviewed in v5. As it must return only ?ModelInterface.
-     * @see https://github.com/phalcon/cphalcon/issues/15212
-     */
-    public static function findFirst(parameters = null) -> var | null;
-
-    /**
      * Fires an event, implicitly calls behaviors and listeners in the events
      * manager are notified
      */
-    public function fireEvent(string! eventName) -> bool;
+    public function fireEvent(string eventName) -> bool;
 
     /**
      * Fires an event, implicitly calls behaviors and listeners in the events
      * manager are notified. This method stops if one of the callbacks/listeners
      * returns bool false
      */
-    public function fireEventCancel(string! eventName) -> bool;
+    public function fireEventCancel(string eventName) -> bool;
 
     /**
      * Returns one of the DIRTY_STATE_* constants telling if the record exists
@@ -192,29 +259,6 @@ interface ModelInterface
     public function getWriteConnectionService() -> string;
 
     /**
-     * Allows to get the maximum value of a column that match the specified
-     * conditions
-     *
-     * @param array parameters
-     * @return mixed
-     */
-    public static function maximum(parameters = null) -> var;
-
-    /**
-     * Allows to get the minimum value of a column that match the specified
-     * conditions
-     *
-     * @param array parameters
-     * @return mixed
-     */
-    public static function minimum(parameters = null) -> var;
-
-    /**
-     * Create a criteria for a specific model
-     */
-    public static function query(<DiInterface> container = null) -> <CriteriaInterface>;
-
-    /**
      * Refreshes the model attributes re-querying the record from the database
      */
     public function refresh() -> <ModelInterface>;
@@ -246,8 +290,20 @@ interface ModelInterface
      * snapshot data when the model was set up to keep snapshot data
      *
      * @param array columnMap
+     *
+     * @phpstan-param mvc_model_data $data
      */
-    public function setSnapshotData(array! data, columnMap = null) -> void;
+    public function setSnapshotData(array data, columnMap = null) -> void;
+
+    /**
+     * Marks one or more many-to-many relationships to be synchronized (or not)
+     * on the next save() call.
+     *
+     * @param string|array|null elements
+     *
+     * @phpstan-param mvc_model_data $elements
+     */
+    public function setSync(var elements = null, bool enabled = true) -> <ModelInterface>;
 
     /**
      * Sets a transaction related to the Model instance
@@ -265,22 +321,14 @@ interface ModelInterface
     public function skipOperation(bool skip) -> void;
 
     /**
-     * Allows to calculate a sum on a column that match the specified conditions
-     *
-     * @param array parameters
-     * @return float|ResultsetInterface
+     * Updates a model instance. If the instance does not exist in the
+     * persistence it will throw an exception. Returning true on success or
+     * false otherwise.
      */
-    public static function sum(parameters = null) -> float | <ResultsetInterface>;
+    public function update() -> bool;
 
     /**
      * Check whether validation process has generated any messages
      */
     public function validationHasFailed() -> bool;
-
-    /**
-     * Updates a model instance. If the instance doesn't exist in the
-     * persistence it will throw an exception. Returning true on success or
-     * false otherwise.
-     */
-    public function update() -> bool;
 }

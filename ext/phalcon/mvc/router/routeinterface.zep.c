@@ -21,9 +21,12 @@
  * file that was distributed with this source code.
  */
 /**
- * Phalcon\Mvc\Router\RouteInterface
- *
  * Interface for Phalcon\Mvc\Router\Route
+ *
+ * @phpstan-import-type mvc_router_http_methods from MvcTypes
+ * @phpstan-import-type mvc_router_paths from MvcTypes
+ * @phpstan-import-type mvc_router_converters from MvcTypes
+ * @phpstan-import-type mvc_router_reversed_paths from MvcTypes
  */
 ZEPHIR_INIT_CLASS(Phalcon_Mvc_Router_RouteInterface)
 {
@@ -32,6 +35,10 @@ ZEPHIR_INIT_CLASS(Phalcon_Mvc_Router_RouteInterface)
 	return SUCCESS;
 }
 
+/**
+ * Resets the internal route id generator
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, reset);
 /**
  * Replaces placeholders from pattern returning a valid PCRE regular expression
  */
@@ -50,6 +57,8 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, getCompiledPattern);
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, getHostname);
 /**
  * Returns the HTTP methods that constraint matching the route
+ *
+ * @phpstan-return mvc_router_http_methods|string|null
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, getHttpMethods);
 /**
@@ -58,6 +67,8 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, getHttpMethods);
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, getName);
 /**
  * Returns the paths
+ *
+ * @phpstan-return mvc_router_paths
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, getPaths);
 /**
@@ -66,12 +77,18 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, getPaths);
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, getPattern);
 /**
  * Returns the paths using positions as keys and names as values
+ *
+ * @phpstan-return mvc_router_reversed_paths
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, getReversedPaths);
 /**
  * Returns the route's id
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, getRouteId);
+/**
+ * Reconfigure the route adding a new pattern and a set of paths
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, reConfigure);
 /**
  * Sets a hostname restriction to the route
  */
@@ -85,13 +102,9 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, setHttpMethods);
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, setName);
 /**
- * Reconfigure the route adding a new pattern and a set of paths
+ * Sets the route's id (intended for restoring cached routes)
  */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, reConfigure);
-/**
- * Resets the internal route id generator
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, reset);
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_Router_RouteInterface, setRouteId);
 /**
  * Set one or more HTTP methods that constraint the matching of the route
  */

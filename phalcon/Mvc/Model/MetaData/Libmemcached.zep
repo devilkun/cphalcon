@@ -10,25 +10,26 @@
 
 namespace Phalcon\Mvc\Model\MetaData;
 
-use Phalcon\Mvc\Model\Exception;
-use Phalcon\Mvc\Model\MetaData;
 use Phalcon\Cache\AdapterFactory;
+use Phalcon\Contracts\Mvc\MvcTypes;
+use Phalcon\Contracts\Storage\StorageTypes;
+use Phalcon\Mvc\Model\MetaData;
 
 /**
- * Phalcon\Mvc\Model\MetaData\Libmemcached
- *
  * Stores model meta-data in the Memcache.
  *
  * By default meta-data is stored for 48 hours (172800 seconds)
+ *
+ * @phpstan-import-type storage_adapter_options from StorageTypes
  */
 class Libmemcached extends MetaData
 {
     /**
      * Phalcon\Mvc\Model\MetaData\Libmemcached constructor
      *
-     * @param array options
+     * @param array<string, mixed> $options
      */
-    public function __construct(<AdapterFactory> factory, array! options = [])
+    public function __construct(<AdapterFactory> factory,  array options = [])
     {
         let options["persistentId"] = this->getArrVal(options, "persistentId", "ph-mm-mcid-"),
             options["prefix"]       = this->getArrVal(options, "prefix", "ph-mm-memc-"),

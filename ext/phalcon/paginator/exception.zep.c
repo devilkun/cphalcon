@@ -23,13 +23,11 @@
  * file that was distributed with this source code.
  */
 /**
- * Phalcon\Paginator\Exception
- *
  * Exceptions thrown in Phalcon\Paginator will use this class
  */
 ZEPHIR_INIT_CLASS(Phalcon_Paginator_Exception)
 {
-	ZEPHIR_REGISTER_CLASS_EX(Phalcon\\Paginator, Exception, phalcon, paginator_exception, phalcon_exception_ce, NULL, 0);
+	ZEPHIR_REGISTER_CLASS_EX(Phalcon\\Paginator, Exception, phalcon, paginator_exception, zend_ce_exception, NULL, 0);
 
 	return SUCCESS;
 }

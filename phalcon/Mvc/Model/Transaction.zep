@@ -12,14 +12,13 @@ namespace Phalcon\Mvc\Model;
 
 use Phalcon\Db\Adapter\AdapterInterface;
 use Phalcon\Di\DiInterface;
-use Phalcon\Mvc\ModelInterface;
+use Phalcon\Messages\MessageInterface;
 use Phalcon\Mvc\Model\Transaction\Failed as TxFailed;
 use Phalcon\Mvc\Model\Transaction\ManagerInterface;
 use Phalcon\Mvc\Model\TransactionInterface;
+use Phalcon\Mvc\ModelInterface;
 
 /**
- * Phalcon\Mvc\Model\Transaction
- *
  * Transactions are protective blocks where SQL statements are only permanent if
  * they can all succeed as one atomic action. Phalcon\Transaction is intended to
  * be used with Phalcon_Model_Base. Phalcon Transactions should be created using
@@ -34,25 +33,25 @@ use Phalcon\Mvc\Model\TransactionInterface;
  *
  *     $transaction = $manager->get();
  *
- *     $robot = new Robots();
+ *     $invoice = new Invoices();
  *
- *     $robot->setTransaction($transaction);
+ *     $invoice->setTransaction($transaction);
  *
- *     $robot->name       = "WALL·E";
- *     $robot->created_at = date("Y-m-d");
+ *     $invoice->inv_title    = "Test Invoice";
+ *     $invoice->inv_created_at = date("Y-m-d");
  *
- *     if ($robot->save() === false) {
- *         $transaction->rollback("Can't save robot");
+ *     if ($invoice->save() === false) {
+ *         $transaction->rollback("Can't save invoice");
  *     }
  *
- *     $robotPart = new RobotParts();
+ *     $product = new Products();
  *
- *     $robotPart->setTransaction($transaction);
+ *     $product->setTransaction($transaction);
  *
- *     $robotPart->type = "head";
+ *     $product->prd_name = "Widget";
  *
- *     if ($robotPart->save() === false) {
- *         $transaction->rollback("Can't save robot part");
+ *     if ($product->save() === false) {
+ *         $transaction->rollback("Can't save product");
  *     }
  *
  *     $transaction->commit();
@@ -63,58 +62,34 @@ use Phalcon\Mvc\Model\TransactionInterface;
  */
 class Transaction implements TransactionInterface
 {
-    /**
-     * @var bool
-     */
-    protected activeTransaction = false;
+    protected bool activeTransaction = false;
 
     /**
      * @var AdapterInterface
      */
     protected connection;
 
-    /**
-     * @var bool
-     */
-    protected isNewTransaction = true;
+    protected bool isNewTransaction = true;
+
+    protected ?<ManagerInterface> manager = null;
 
     /**
-     * @var ManagerInterface|null
+     * @phpstan-var list<MessageInterface>
      */
-    protected manager = null;
+    protected array messages = [];
 
-    /**
-     * @var array
-     */
-    protected messages = [];
+    protected bool rollbackOnAbort = false;
 
-    /**
-     * @var ModelInterface|null
-     */
-    protected rollbackRecord = null;
+    protected ?<ModelInterface> rollbackRecord = null;
 
-    /**
-     * @var bool
-     */
-    protected rollbackOnAbort = false;
-
-    /**
-     * @var bool
-     */
-    protected rollbackThrowException = false;
+    protected bool rollbackThrowException = false;
 
     /**
      * Phalcon\Mvc\Model\Transaction constructor
-     *
-     * @param DiInterface container
-     * @param bool autoBegin
-     * @param string service
      */
     public function __construct(<DiInterface> container, bool autoBegin = false, string service = "db")
     {
         var connection;
-
-        let this->messages = [];
 
         let connection = container->get(service);
 
@@ -165,6 +140,8 @@ class Transaction implements TransactionInterface
 
     /**
      * Returns validations messages from last save try
+     *
+     * @phpstan-return list<MessageInterface>
      */
     public function getMessages() -> array
     {
@@ -228,19 +205,19 @@ class Transaction implements TransactionInterface
     }
 
     /**
-     * Sets flag to rollback on abort the HTTP connection
-     */
-    public function setRollbackOnAbort(bool rollbackOnAbort) -> void
-    {
-        let this->rollbackOnAbort = rollbackOnAbort;
-    }
-
-    /**
      * Sets object which generates rollback action
      */
     public function setRollbackedRecord(<ModelInterface> record) -> void
     {
         let this->rollbackRecord = record;
+    }
+
+    /**
+     * Sets flag to rollback on abort the HTTP connection
+     */
+    public function setRollbackOnAbort(bool rollbackOnAbort) -> void
+    {
+        let this->rollbackOnAbort = rollbackOnAbort;
     }
 
     /**

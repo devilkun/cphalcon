@@ -21,13 +21,17 @@
  *
  * For the full copyright and license information, please view the LICENSE.txt
  * file that was distributed with this source code.
+ *
+ * Implementation of this file has been influenced by AuraPHP
+ * @link    https://github.com/auraphp/Aura.Html
+ * @license https://github.com/auraphp/Aura.Html/blob/2.x/LICENSE
  */
 /**
- * Exceptions thrown in Phalcon\Html\Escaper will use this class
+ * Class Exception
  */
 ZEPHIR_INIT_CLASS(Phalcon_Html_Escaper_Exception)
 {
-	ZEPHIR_REGISTER_CLASS_EX(Phalcon\\Html\\Escaper, Exception, phalcon, html_escaper_exception, phalcon_exception_ce, NULL, 0);
+	ZEPHIR_REGISTER_CLASS_EX(Phalcon\\Html\\Escaper, Exception, phalcon, html_escaper_exception, zend_ce_exception, NULL, 0);
 
 	return SUCCESS;
 }

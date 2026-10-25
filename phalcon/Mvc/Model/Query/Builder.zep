@@ -10,16 +10,23 @@
 
 namespace Phalcon\Mvc\Model\Query;
 
-use Phalcon\Di;
+use Phalcon\Contracts\Mvc\MvcTypes;
 use Phalcon\Db\Column;
+use Phalcon\Di\Di;
 use Phalcon\Di\DiInterface;
-use Phalcon\Mvc\Model\Exception;
 use Phalcon\Di\InjectionAwareInterface;
+use Phalcon\Mvc\Model\Exception;
+use Phalcon\Mvc\Model\Exceptions\ManagerOrmServicesUnavailable;
+use Phalcon\Mvc\Model\Query;
+use Phalcon\Mvc\Model\Query\Exceptions\Builder\BuilderColumnNotInMap;
+use Phalcon\Mvc\Model\Query\Exceptions\Builder\BuilderConditionInvalid;
+use Phalcon\Mvc\Model\Query\Exceptions\Builder\ModelRequired;
+use Phalcon\Mvc\Model\Query\Exceptions\Builder\NoPrimaryKey;
+use Phalcon\Mvc\Model\Query\Exceptions\Builder\OperatorNotAvailable;
 use Phalcon\Mvc\Model\QueryInterface;
+use Phalcon\Support\Settings;
 
 /**
- * Phalcon\Mvc\Model\Query\Builder
- *
  * Helps to create PHQL queries using an OO interface
  *
  *```php
@@ -52,94 +59,83 @@ use Phalcon\Mvc\Model\QueryInterface;
  *
  * $queryBuilder = new \Phalcon\Mvc\Model\Query\Builder($params);
  *```
+ *
+ * @phpstan-import-type mvc_model_bind_params from MvcTypes
+ * @phpstan-import-type mvc_model_bind_types from MvcTypes
+ * @phpstan-import-type mvc_query_builder_join from MvcTypes
+ * @phpstan-import-type mvc_query_builder_params from MvcTypes
+ * @phpstan-import-type mvc_query_columns from MvcTypes
+ * @phpstan-import-type mvc_query_order from MvcTypes
  */
 class Builder implements BuilderInterface, InjectionAwareInterface
 {
     /**
-     * @var array
+     * @phpstan-var mvc_model_bind_params
      */
-    protected bindParams = [];
-
+    protected array bindParams = [];
     /**
-     * @var array
+     * @phpstan-var mvc_model_bind_types
      */
-    protected bindTypes = [];
-
+    protected array bindTypes = [];
     /**
-     * @var array|string|null
+     * @phpstan-var mvc_query_columns|null
      */
     protected columns = null;
-
     /**
-     * @var array|string|null
+     * @phpstan-var array<array-key, mixed>|int|string|null
      */
     protected conditions = null;
 
     /**
      * @var DiInterface|null
+     *
+     * @phpstan-var DiInterface|null
      */
     protected container;
-
     /**
      * @var mixed
      */
     protected distinct = null;
-
+    protected bool forUpdate = false;
     /**
-     * @var bool
-     */
-    protected forUpdate = false;
-
-    /**
-     * @var array
+     * @phpstan-var array<array-key, string>|null
      */
     protected group = [];
-
     /**
      * @var string|null
      */
     protected having = null;
-
+    protected int hiddenParamNumber = 0;
     /**
-     * @var int
+     * @phpstan-var array<array-key, mvc_query_builder_join>
      */
-    protected hiddenParamNumber = 0;
-
-    /**
-     * @var array
-     */
-    protected joins = [];
-
+    protected array joins = [];
     /**
      * @var array|string
+     *
+     * @phpstan-var array<array-key, mixed>|int|string|null
      */
     protected limit;
-
     /**
      * @var array|string
+     *
+     * @phpstan-var mvc_query_columns|null
      */
     protected models;
-
-    /**
-     * @var int
-     */
-    protected offset = 0;
-
+    protected int offset = 0;
     /**
      * @var array|string
+     *
+     * @phpstan-var array<array-key, int|string>|string|null
      */
     protected order;
-
-    /**
-     * @var bool
-     */
-    protected sharedLock = false;
+    protected string resultsetRowClass = "";
+    protected bool sharedLock = false;
 
     /**
      * Phalcon\Mvc\Model\Query\Builder constructor
      *
      * @param array|string|null params
-     * @param DiInterface|null container
      */
     public function __construct(var params = null, <DiInterface> container = null)
     {
@@ -311,14 +307,14 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * Add a model to take part of the query
      *
      *```php
-     * // Load data from models Robots
+     * // Load data from models Invoices
      * $builder->addFrom(
-     *     Robots::class
+     *     Invoices::class
      * );
      *
-     * // Load data from model 'Robots' using 'r' as alias in PHQL
+     * // Load data from model 'Invoices' using 'r' as alias in PHQL
      * $builder->addFrom(
-     *     Robots::class,
+     *     Invoices::class,
      *     "r"
      * );
      *```
@@ -353,17 +349,20 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * Appends a condition to the current HAVING conditions clause using a AND operator
      *
      *```php
-     * $builder->andHaving("SUM(Robots.price) > 0");
+     * $builder->andHaving("SUM(Invoices.inv_total) > 0");
      *
      * $builder->andHaving(
-     *     "SUM(Robots.price) > :sum:",
+     *     "SUM(Invoices.inv_total) > :sum:",
      *     [
      *         "sum" => 100,
      *     ]
      * );
      *```
+     *
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
-    public function andHaving(string! conditions, array bindParams = [], array bindTypes = []) -> <BuilderInterface>
+    public function andHaving(string conditions, array bindParams = [], array bindTypes = []) -> <BuilderInterface>
     {
         var currentConditions;
 
@@ -393,8 +392,11 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      *     ]
      * );
      *```
+     *
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
-    public function andWhere(string! conditions, array bindParams = [], array bindTypes = []) -> <BuilderInterface>
+    public function andWhere(string conditions, array bindParams = [], array bindTypes = []) -> <BuilderInterface>
     {
         var currentConditions;
 
@@ -415,7 +417,7 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      */
     final public function autoescape(string identifier) -> string
     {
-        if memstr(identifier, "[") || memstr(identifier, ".") || is_numeric(identifier) {
+        if memstr(identifier, "[") || memstr(identifier, ".") || memstr(identifier, "(") || is_numeric(identifier) {
             return identifier;
         }
 
@@ -426,10 +428,10 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * Appends a BETWEEN condition to the current HAVING conditions clause
      *
      *```php
-     * $builder->betweenHaving("SUM(Robots.price)", 100.25, 200.50);
+     * $builder->betweenHaving("SUM(Invoices.inv_total)", 100.25, 200.50);
      *```
      */
-    public function betweenHaving(string! expr, var minimum, var maximum, string! operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
+    public function betweenHaving(string expr, var minimum, var maximum,  string operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
     {
         return this->conditionBetween("Having", operator, expr, minimum, maximum);
     }
@@ -441,31 +443,57 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * $builder->betweenWhere("price", 100.25, 200.50);
      *```
      */
-    public function betweenWhere(string! expr, var minimum, var maximum, string! operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
+    public function betweenWhere(string expr, var minimum, var maximum,  string operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
     {
         return this->conditionBetween("Where", operator, expr, minimum, maximum);
     }
 
     /**
-     * Sets the columns to be queried
+     * Sets the columns to be queried. The columns can be either a `string` or
+     * an `array` of strings. If the argument is a (single, non-embedded) string,
+     * its content can specify one or more columns, separated by commas, the same
+     * way that one uses the SQL select statement. You can use aliases, aggregate
+     * functions, etc. If you need to reference other models you will need to
+     * reference them with their namespaces.
+     *
+     * When using an array as a parameter, you will need to specify one field
+     * per array element. If a non-numeric key is defined in the array, it will
+     * be used as the alias in the query
      *
      *```php
-     * $builder->columns("id, name");
+     * <?php
      *
+     * // String, comma separated values
+     * $builder->columns("id, category");
+     *
+     * // Array, one column per element
      * $builder->columns(
      *     [
-     *         "id",
-     *         "name",
+     *         "inv_id",
+     *         "inv_total",
      *     ]
      * );
      *
+     * // Array with named key. The name of the key acts as an
+     * // alias (`AS` clause)
      * $builder->columns(
      *     [
-     *         "name",
-     *         "number" => "COUNT(*)",
+     *         "inv_cst_id",
+     *         "total_invoices" => "COUNT(*)",
+     *     ]
+     * );
+     *
+     * // Different models
+     * $builder->columns(
+     *     [
+     *         "\Phalcon\Models\Invoices.*",
+     *         "\Phalcon\Models\Customers.cst_name_first",
+     *         "\Phalcon\Models\Customers.cst_name_last",
      *     ]
      * );
      *```
+     *
+     * @param string|array $columns
      */
     public function columns(var columns) -> <BuilderInterface>
     {
@@ -508,23 +536,25 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      *
      *```php
      * $builder->from(
-     *     Robots::class
+     *     Invoices::class
      * );
      *
      * $builder->from(
      *     [
-     *         Robots::class,
-     *         RobotsParts::class,
+     *         Invoices::class,
+     *         OrdersProducts::class,
      *     ]
      * );
      *
      * $builder->from(
      *     [
-     *         "r"  => Robots::class,
-     *         "rp" => RobotsParts::class,
+     *         "r"  => Invoices::class,
+     *         "rp" => OrdersProducts::class,
      *     ]
      * );
      *```
+     *
+     * @phpstan-param mvc_query_columns $models
      */
     public function from(var models) -> <BuilderInterface>
     {
@@ -535,6 +565,8 @@ class Builder implements BuilderInterface, InjectionAwareInterface
 
     /**
      * Returns default bind params
+     *
+     * @phpstan-return mvc_model_bind_params
      */
     public function getBindParams() -> array
     {
@@ -543,6 +575,8 @@ class Builder implements BuilderInterface, InjectionAwareInterface
 
     /**
      * Returns default bind types
+     *
+     * @phpstan-return mvc_model_bind_types
      */
     public function getBindTypes() -> array
     {
@@ -553,6 +587,8 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * Return the columns to be queried
      *
      * @return array|string
+     *
+     * @phpstan-return mvc_query_columns|null
      */
     public function getColumns()
     {
@@ -579,6 +615,8 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * Return the models who makes part of the query
      *
      * @return array|string
+     *
+     * @phpstan-return mvc_query_columns|null
      */
     public function getFrom()
     {
@@ -587,6 +625,8 @@ class Builder implements BuilderInterface, InjectionAwareInterface
 
     /**
      * Returns the GROUP BY clause
+     *
+     * @phpstan-return array<array-key, string>
      */
     public function getGroupBy() -> array
     {
@@ -596,13 +636,15 @@ class Builder implements BuilderInterface, InjectionAwareInterface
     /**
      * Return the current having clause
      */
-    public function getHaving() -> string
+    public function getHaving() -> string | null
     {
         return this->having;
     }
 
     /**
      * Return join parts of the query
+     *
+     * @phpstan-return array<array-key, mvc_query_builder_join>
      */
     public function getJoins() -> array
     {
@@ -613,6 +655,8 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * Returns the current LIMIT clause
      *
      * @return array|string
+     *
+     * @phpstan-return array<array-key, mixed>|int|string|null
      */
     public function getLimit()
     {
@@ -621,8 +665,10 @@ class Builder implements BuilderInterface, InjectionAwareInterface
 
     /**
      * Returns the models involved in the query
+     *
+     * @phpstan-return mvc_query_columns|null
      */
-    public function getModels() -> string | array | null
+    public function getModels() -> array | string | null
     {
         var models = this->models;
 
@@ -645,6 +691,8 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * Returns the set ORDER BY clause
      *
      * @return array|string
+     *
+     * @phpstan-return array<array-key, int|string>|string|null
      */
     public function getOrderBy()
     {
@@ -656,13 +704,14 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      */
     final public function getPhql() -> string
     {
-        var container, models, conditions, model, metaData, modelInstance,
-            primaryKeys, firstPrimaryKey, columnMap, modelAlias,
-            attributeField, phql, column, columns, selectedColumns,
-            selectedColumn, selectedModel, selectedModels, columnAlias,
-            modelColumnAlias, joins, join, joinModel, joinConditions,
-            joinAlias, joinType, group, groupItems, groupItem, having, order,
-            orderItems, orderItem, limit, number, offset, forUpdate, distinct;
+        var attributeField, column, columnAlias, columnMap, columns, conditions,
+            container, distinct, firstPrimaryKey, forUpdate, group, groupItem,
+            groupItems, having, join, joinAlias, joinConditions, joinModel,
+            joinType, joins, limit, metaData, model, modelAlias, modelColumnAlias,
+            modelInstance, models, number, order, orderItem, orderItems, phql,
+            primaryKeys, selectedColumn, selectedColumns, selectedModel,
+            selectedModels,
+            offset = null;
         bool noPrimary;
 
         let container = this->container;
@@ -673,16 +722,12 @@ class Builder implements BuilderInterface, InjectionAwareInterface
 
         let models = this->models;
         if typeof models == "array" {
-            if unlikely !count(models) {
-                throw new Exception(
-                    "At least one model is required to build the query"
-                );
+            if unlikely empty models {
+                throw new ModelRequired();
             }
         } else {
             if unlikely !models {
-                throw new Exception(
-                    "At least one model is required to build the query"
-                );
+                throw new ModelRequired();
             }
         }
 
@@ -695,9 +740,7 @@ class Builder implements BuilderInterface, InjectionAwareInterface
              */
             if typeof models == "array" {
                 if unlikely count(models) > 1 {
-                    throw new Exception(
-                        "Cannot build the query. Invalid condition"
-                    );
+                    throw new BuilderConditionInvalid();
                 }
 
                 let model = models[0];
@@ -721,12 +764,12 @@ class Builder implements BuilderInterface, InjectionAwareInterface
             let noPrimary = true,
                 primaryKeys = metaData->getPrimaryKeyAttributes(modelInstance);
 
-            if count(primaryKeys) {
+            if !empty primaryKeys {
                 if fetch firstPrimaryKey, primaryKeys[0] {
                     /**
                      * The PHQL contains the renamed columns if available
                      */
-                    if globals_get("orm.column_renaming") {
+                    if Settings::get("orm.column_renaming") {
                         let columnMap = metaData->getColumnMap(modelInstance);
                     } else {
                         let columnMap = null;
@@ -734,25 +777,20 @@ class Builder implements BuilderInterface, InjectionAwareInterface
 
                     if typeof columnMap == "array" {
                         if unlikely !fetch attributeField, columnMap[firstPrimaryKey] {
-                            throw new Exception(
-                                "Column '" . firstPrimaryKey . "' isn't part of the column map"
-                            );
+                            throw new BuilderColumnNotInMap(firstPrimaryKey);
                         }
                     } else {
                         let attributeField = firstPrimaryKey;
                     }
 
-                    // check the type of the condition, if it's a string put single quotes around the value
-                    if is_string(conditions) {
-                        /*
-                         * Example : if the developer writes findFirstBy('135'), Phalcon will generate where uuid = 135.
-                         * But the column's type is text so Postgres needs to have single quotes such as ;
-                         * where uuid = '135'.
-                         */
-                        let conditions = "'" . conditions . "'";
-                    }
-
-                    let conditions = this->autoescape(model) . "." . this->autoescape(attributeField) . " = " . conditions,
+                    /**
+                     * Use a named bind parameter instead of embedding the value
+                     * directly in the PHQL string. Embedding produces a unique
+                     * PHQL string per ID value, causing unbounded growth of the
+                     * internal PHQL cache in long-running processes.
+                     */
+                    let this->bindParams["APK0"] = conditions,
+                        conditions = this->autoescape(model) . "." . this->autoescape(attributeField) . " = :APK0:",
                         noPrimary = false;
                 }
             }
@@ -761,9 +799,7 @@ class Builder implements BuilderInterface, InjectionAwareInterface
              * A primary key is mandatory in these cases
              */
             if unlikely noPrimary {
-                throw new Exception(
-                    "Source related to this model does not have a primary key defined"
-                );
+                throw new NoPrimaryKey();
             }
         }
 
@@ -946,16 +982,37 @@ class Builder implements BuilderInterface, InjectionAwareInterface
                         continue;
                     }
 
-                    if memstr(orderItem, " ") !== 0 {
-                        var itemExplode;
+                    /**
+                     * For cases 'ORDER BY column ASC' and complex expressions
+                     */
+                    var itemTrimmed, lastSpacePosition;
 
-                        let itemExplode = explode(" ", orderItem);
-                        let orderItems[] = this->autoescape(itemExplode[0]) . " " . itemExplode[1];
+                    let itemTrimmed = trim(orderItem),
+                        lastSpacePosition = strrpos(itemTrimmed, " ");
+
+                    if false !== lastSpacePosition {
+                        var perhapsExpression, perhapsDirection;
+
+                        let perhapsExpression = trim(substr(itemTrimmed, 0, lastSpacePosition)),
+                            perhapsDirection = rtrim(substr(itemTrimmed, lastSpacePosition + 1));
+
+                        if (
+                            strcasecmp(perhapsDirection, "desc") == 0 ||
+                            strcasecmp(perhapsDirection, "asc") == 0
+                        ) {
+                            if !memstr(perhapsExpression, " ") {
+                                let perhapsExpression = this->autoescape(perhapsExpression);
+                            }
+
+                            let orderItems[] = perhapsExpression . " " . perhapsDirection;
+                        } else {
+                            let orderItems[] = itemTrimmed;
+                        }
 
                         continue;
                     }
 
-                    let orderItems[] = this->autoescape(orderItem);
+                    let orderItems[] = this->autoescape(itemTrimmed);
                 }
 
                 let phql .= " ORDER BY " . join(", ", orderItems);
@@ -1027,18 +1084,14 @@ class Builder implements BuilderInterface, InjectionAwareInterface
         let container = <DiInterface> this->container;
 
         if unlikely typeof container != "object" {
-            throw new Exception(
-                Exception::containerServiceNotFound(
-                    "the services related to the ORM"
-                )
-            );
+            throw new ManagerOrmServicesUnavailable();
         }
 
         /**
          * Gets Query instance from DI container
          */
         let query = <QueryInterface> container->get(
-            "Phalcon\\Mvc\\Model\\Query",
+            Query::class,
             [phql, container]
         );
 
@@ -1058,13 +1111,36 @@ class Builder implements BuilderInterface, InjectionAwareInterface
             query->setSharedLock(this->sharedLock);
         }
 
+        /**
+         * The accessor is not part of QueryInterface (see the interface's
+         * v7 note), so a custom query service may not implement it.
+         *
+         * @todo v7: remove the method_exists() guard once the accessors are
+         *       promoted to QueryInterface.
+         */
+        if this->resultsetRowClass != "" && method_exists(query, "setResultsetRowClass") {
+            query->setResultsetRowClass(this->resultsetRowClass);
+        }
+
         return query;
+    }
+
+    /**
+     * Returns the class that will be used to hydrate rows that are not mapped
+     * to a model (custom columns/joins). An empty string means the default
+     * Phalcon\Mvc\Model\Row is used.
+     */
+    public function getResultsetRowClass() -> string
+    {
+        return this->resultsetRowClass;
     }
 
     /**
      * Return the conditions for the query
      *
      * @return array|string
+     *
+     * @phpstan-return array<array-key, mixed>|string|null
      */
     public function getWhere()
     {
@@ -1077,12 +1153,17 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      *```php
      * $builder->groupBy(
      *     [
-     *         "Robots.name",
+     *         "Invoices.inv_title",
      *     ]
      * );
      *```
      *
-     * @param array|string group
+     * Passing null (or an empty array) clears the clause; the PHQL generator
+     * treats both as "no GROUP BY".
+     *
+     * @param array|string|null $group
+     *
+     * @phpstan-param array<array-key, string>|string|null $group
      */
     public function groupBy(var group) -> <BuilderInterface>
     {
@@ -1103,15 +1184,18 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * Sets the HAVING condition clause
      *
      *```php
-     * $builder->having("SUM(Robots.price) > 0");
+     * $builder->having("SUM(Invoices.inv_total) > 0");
      *
      * $builder->having(
-     *     "SUM(Robots.price) > :sum:",
+     *     "SUM(Invoices.inv_total) > :sum:",
      *     [
      *         "sum" => 100,
      *     ]
      * );
      *```
+     *
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
     public function having(string conditions, array bindParams = [], array bindTypes = []) -> <BuilderInterface>
     {
@@ -1148,10 +1232,12 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * Appends an IN condition to the current HAVING conditions clause
      *
      *```php
-     * $builder->inHaving("SUM(Robots.price)", [100, 200]);
+     * $builder->inHaving("SUM(Invoices.inv_total)", [100, 200]);
      *```
+     *
+     * @phpstan-param array<array-key, mixed> $values
      */
-    public function inHaving(string! expr, array! values, string! operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
+    public function inHaving(string expr,  array values,  string operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
     {
         return this->conditionIn("Having", operator, expr, values);
     }
@@ -1160,26 +1246,26 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * Adds an INNER join to the query
      *
      *```php
-     * // Inner Join model 'Robots' with automatic conditions and alias
+     * // Inner Join model 'Invoices' with automatic conditions and alias
      * $builder->innerJoin(
-     *     Robots::class
+     *     Invoices::class
      * );
      *
-     * // Inner Join model 'Robots' specifying conditions
+     * // Inner Join model 'Invoices' specifying conditions
      * $builder->innerJoin(
-     *     Robots::class,
-     *     "Robots.id = RobotsParts.robots_id"
+     *     Invoices::class,
+     *     "Invoices.inv_id = OrdersProducts.oxp_ord_id"
      * );
      *
-     * // Inner Join model 'Robots' specifying conditions and alias
+     * // Inner Join model 'Invoices' specifying conditions and alias
      * $builder->innerJoin(
-     *     Robots::class,
-     *     "r.id = RobotsParts.robots_id",
+     *     Invoices::class,
+     *     "r.inv_id = OrdersProducts.oxp_ord_id",
      *     "r"
      * );
      *```
      */
-    public function innerJoin(string! model, string conditions = null, string alias = null) -> <BuilderInterface>
+    public function innerJoin(string model, string conditions = null, string alias = null) -> <BuilderInterface>
     {
         let this->joins[] = [model, conditions, alias, "INNER"];
 
@@ -1195,8 +1281,10 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      *     [1, 2, 3]
      * );
      *```
+     *
+     * @phpstan-param array<array-key, mixed> $values
      */
-    public function inWhere(string! expr, array! values, string! operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
+    public function inWhere(string expr,  array values,  string operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
     {
         return this->conditionIn("Where", operator, expr, values);
     }
@@ -1205,34 +1293,34 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * Adds an :type: join (by default type - INNER) to the query
      *
      *```php
-     * // Inner Join model 'Robots' with automatic conditions and alias
+     * // Inner Join model 'Invoices' with automatic conditions and alias
      * $builder->join(
-     *     Robots::class
+     *     Invoices::class
      * );
      *
-     * // Inner Join model 'Robots' specifying conditions
+     * // Inner Join model 'Invoices' specifying conditions
      * $builder->join(
-     *     Robots::class,
-     *     "Robots.id = RobotsParts.robots_id"
+     *     Invoices::class,
+     *     "Invoices.inv_id = OrdersProducts.oxp_ord_id"
      * );
      *
-     * // Inner Join model 'Robots' specifying conditions and alias
+     * // Inner Join model 'Invoices' specifying conditions and alias
      * $builder->join(
-     *     Robots::class,
-     *     "r.id = RobotsParts.robots_id",
+     *     Invoices::class,
+     *     "r.inv_id = OrdersProducts.oxp_ord_id",
      *     "r"
      * );
      *
-     * // Left Join model 'Robots' specifying conditions, alias and type of join
+     * // Left Join model 'Invoices' specifying conditions, alias and type of join
      * $builder->join(
-     *     Robots::class,
-     *     "r.id = RobotsParts.robots_id",
+     *     Invoices::class,
+     *     "r.inv_id = OrdersProducts.oxp_ord_id",
      *     "r",
      *     "LEFT"
      * );
      *```
      */
-    public function join(string! model, string conditions = null, string alias = null, string type = null) -> <BuilderInterface>
+    public function join(string model, string conditions = null, string alias = null, string type = null) -> <BuilderInterface>
     {
         let this->joins[] = [model, conditions, alias, type];
 
@@ -1244,13 +1332,13 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      *
      *```php
      * $builder->leftJoin(
-     *     Robots::class,
-     *     "r.id = RobotsParts.robots_id",
+     *     Invoices::class,
+     *     "r.inv_id = OrdersProducts.oxp_ord_id",
      *     "r"
      * );
      *```
      */
-    public function leftJoin(string! model, string conditions = null, string alias = null) -> <BuilderInterface>
+    public function leftJoin(string model, string conditions = null, string alias = null) -> <BuilderInterface>
     {
         let this->joins[] = [model, conditions, alias, "LEFT"];
 
@@ -1287,10 +1375,10 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * Appends a NOT BETWEEN condition to the current HAVING conditions clause
      *
      *```php
-     * $builder->notBetweenHaving("SUM(Robots.price)", 100.25, 200.50);
+     * $builder->notBetweenHaving("SUM(Invoices.inv_total)", 100.25, 200.50);
      *```
      */
-    public function notBetweenHaving(string! expr, var minimum, var maximum, string! operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
+    public function notBetweenHaving(string expr, var minimum, var maximum,  string operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
     {
         return this->conditionNotBetween(
             "Having",
@@ -1308,7 +1396,7 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * $builder->notBetweenWhere("price", 100.25, 200.50);
      *```
      */
-    public function notBetweenWhere(string! expr, var minimum, var maximum, string! operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
+    public function notBetweenWhere(string expr, var minimum, var maximum,  string operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
     {
         return this->conditionNotBetween(
             "Where",
@@ -1323,10 +1411,12 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * Appends a NOT IN condition to the current HAVING conditions clause
      *
      *```php
-     * $builder->notInHaving("SUM(Robots.price)", [100, 200]);
+     * $builder->notInHaving("SUM(Invoices.inv_total)", [100, 200]);
      *```
+     *
+     * @phpstan-param array<array-key, mixed> $values
      */
-    public function notInHaving(string! expr, array! values, string! operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
+    public function notInHaving(string expr,  array values,  string operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
     {
         return this->conditionNotIn("Having", operator, expr, values);
     }
@@ -1337,8 +1427,10 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      *```php
      * $builder->notInWhere("id", [1, 2, 3]);
      *```
+     *
+     * @phpstan-param array<array-key, mixed> $values
      */
-    public function notInWhere(string! expr, array! values, string! operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
+    public function notInWhere(string expr,  array values,  string operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>
     {
         return this->conditionNotIn("Where", operator, expr, values);
     }
@@ -1361,12 +1453,10 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * Sets an ORDER BY condition clause
      *
      *```php
-     * $builder->orderBy("Robots.name");
-     * $builder->orderBy(["1", "Robots.name"]);
-     * $builder->orderBy(["Robots.name DESC"]);
+     * $builder->orderBy("Invoices.inv_title");
+     * $builder->orderBy(["1", "Invoices.inv_title"]);
+     * $builder->orderBy(["Invoices.inv_title DESC"]);
      *```
-     *
-     * @param array|string orderBy
      */
     public function orderBy(var orderBy) -> <BuilderInterface>
     {
@@ -1379,17 +1469,20 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * Appends a condition to the current HAVING conditions clause using an OR operator
      *
      *```php
-     * $builder->orHaving("SUM(Robots.price) > 0");
+     * $builder->orHaving("SUM(Invoices.inv_total) > 0");
      *
      * $builder->orHaving(
-     *     "SUM(Robots.price) > :sum:",
+     *     "SUM(Invoices.inv_total) > :sum:",
      *     [
      *         "sum" => 100,
      *     ]
      * );
      *```
+     *
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
-    public function orHaving(string! conditions, array bindParams = [], array bindTypes = []) -> <BuilderInterface>
+    public function orHaving(string conditions, array bindParams = [], array bindTypes = []) -> <BuilderInterface>
     {
         var currentConditions;
 
@@ -1420,7 +1513,7 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      * );
      *```
      */
-    public function orWhere(string! conditions, array bindParams = [], array bindTypes = []) -> <BuilderInterface>
+    public function orWhere(string conditions, array bindParams = [], array bindTypes = []) -> <BuilderInterface>
     {
         var currentConditions;
 
@@ -1441,13 +1534,13 @@ class Builder implements BuilderInterface, InjectionAwareInterface
      *
      *```php
      * $builder->rightJoin(
-     *     Robots::class,
-     *     "r.id = RobotsParts.robots_id",
+     *     Invoices::class,
+     *     "r.inv_id = OrdersProducts.oxp_ord_id",
      *     "r"
      * );
      *```
      */
-    public function rightJoin(string! model, string conditions = null, string alias = null) -> <BuilderInterface>
+    public function rightJoin(string model, string conditions = null, string alias = null) -> <BuilderInterface>
     {
         let this->joins[] = [model, conditions, alias, "RIGHT"];
 
@@ -1456,8 +1549,10 @@ class Builder implements BuilderInterface, InjectionAwareInterface
 
     /**
      * Set default bind parameters
+     *
+     * @phpstan-param mvc_model_bind_params $bindParams
      */
-    public function setBindParams(array! bindParams, bool merge = false) -> <BuilderInterface>
+    public function setBindParams(array bindParams, bool merge = false) -> <BuilderInterface>
     {
         var currentBindParams;
 
@@ -1477,8 +1572,10 @@ class Builder implements BuilderInterface, InjectionAwareInterface
 
     /**
      * Set default bind types
+     *
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
-    public function setBindTypes(array! bindTypes, bool merge = false) -> <BuilderInterface>
+    public function setBindTypes(array bindTypes, bool merge = false) -> <BuilderInterface>
     {
         var currentBindTypes;
 
@@ -1503,6 +1600,19 @@ class Builder implements BuilderInterface, InjectionAwareInterface
     public function setDI(<DiInterface> container) -> void
     {
         let this->container = container;
+    }
+
+    /**
+     * Sets the class used to hydrate rows that are not mapped to a model
+     * (custom columns/joins). The class must be a subclass of
+     * Phalcon\Mvc\Model\Row. Validation is performed by the underlying
+     * Phalcon\Mvc\Model\Query when the query is built.
+     */
+    public function setResultsetRowClass(string resultsetRowClass) -> <BuilderInterface>
+    {
+        let this->resultsetRowClass = resultsetRowClass;
+
+        return this;
     }
 
     /**
@@ -1531,7 +1641,7 @@ class Builder implements BuilderInterface, InjectionAwareInterface
         /**
          * Merge the bind params to the current ones
          */
-        if count(bindParams) > 0 {
+        if !empty bindParams {
             let currentBindParams = this->bindParams;
 
             if typeof currentBindParams == "array" {
@@ -1544,7 +1654,7 @@ class Builder implements BuilderInterface, InjectionAwareInterface
         /**
          * Merge the bind types to the current ones
          */
-        if count(bindTypes) > 0 {
+        if !empty bindTypes {
             let currentBindTypes = this->bindTypes;
 
             if typeof currentBindTypes == "array" {
@@ -1560,17 +1670,12 @@ class Builder implements BuilderInterface, InjectionAwareInterface
     /**
      * Appends a BETWEEN condition
      */
-    protected function conditionBetween(string! clause, string! operator, string! expr, var minimum, var maximum) -> <BuilderInterface>
+    protected function conditionBetween(string clause,  string operator,  string expr, var minimum, var maximum) -> <BuilderInterface>
     {
         var hiddenParam, nextHiddenParam, minimumKey, maximumKey, operatorMethod;
 
         if unlikely (operator !== Builder::OPERATOR_AND && operator !== Builder::OPERATOR_OR) {
-            throw new Exception(
-                sprintf(
-                    "Operator % is not available.",
-                    operator
-                )
-            );
+            throw new OperatorNotAvailable(operator);
         }
 
         let operatorMethod = operator . clause;
@@ -1606,24 +1711,21 @@ class Builder implements BuilderInterface, InjectionAwareInterface
 
     /**
      * Appends an IN condition
+     *
+     * @phpstan-param array<array-key, mixed> $values
      */
-    protected function conditionIn(string! clause, string! operator, string! expr, array! values) -> <BuilderInterface>
+    protected function conditionIn(string clause,  string operator,  string expr,  array values) -> <BuilderInterface>
     {
         var key, queryKey, value, bindKeys, bindParams, operatorMethod;
         int hiddenParam;
 
         if unlikely (operator !== Builder::OPERATOR_AND && operator !== Builder::OPERATOR_OR) {
-            throw new Exception(
-                sprintf(
-                    "Operator % is not available.",
-                    operator
-                )
-            );
+            throw new OperatorNotAvailable(operator);
         }
 
         let operatorMethod = operator . clause;
 
-        if !count(values) {
+        if empty values {
             this->{operatorMethod}(expr . " != " . expr);
 
             return this;
@@ -1662,17 +1764,12 @@ class Builder implements BuilderInterface, InjectionAwareInterface
     /**
      * Appends a NOT BETWEEN condition
      */
-    protected function conditionNotBetween(string! clause, string! operator, string! expr, var minimum, var maximum) -> <BuilderInterface>
+    protected function conditionNotBetween(string clause,  string operator,  string expr, var minimum, var maximum) -> <BuilderInterface>
     {
         var hiddenParam, nextHiddenParam, minimumKey, maximumKey, operatorMethod;
 
         if unlikely (operator !== Builder::OPERATOR_AND && operator !== Builder::OPERATOR_OR) {
-            throw new Exception(
-                sprintf(
-                    "Operator % is not available.",
-                    operator
-                )
-            );
+            throw new OperatorNotAvailable(operator);
         }
 
         let operatorMethod = operator . clause;
@@ -1707,24 +1804,21 @@ class Builder implements BuilderInterface, InjectionAwareInterface
 
     /**
      * Appends a NOT IN condition
+     *
+     * @phpstan-param array<array-key, mixed> $values
      */
-    protected function conditionNotIn(string! clause, string! operator, string! expr, array! values) -> <BuilderInterface>
+    protected function conditionNotIn(string clause,  string operator,  string expr,  array values) -> <BuilderInterface>
     {
         var key, queryKey, value, bindKeys, bindParams, operatorMethod;
         int hiddenParam;
 
         if unlikely (operator !== Builder::OPERATOR_AND && operator !== Builder::OPERATOR_OR) {
-            throw new Exception(
-                sprintf(
-                    "Operator % is not available.",
-                    operator
-                )
-            );
+            throw new OperatorNotAvailable(operator);
         }
 
         let operatorMethod = operator . clause;
 
-        if !count(values) {
+        if empty values {
             this->{operatorMethod}(expr . " != " . expr);
 
             return this;

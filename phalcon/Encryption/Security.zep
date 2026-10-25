@@ -10,12 +10,17 @@
 
 namespace Phalcon\Encryption;
 
+use Phalcon\Contracts\Encryption\EncryptionTypes;
+use Phalcon\Contracts\Encryption\Security\Security as SecurityContract;
 use Phalcon\Di\DiInterface;
 use Phalcon\Di\AbstractInjectionAware;
-use Phalcon\Http\RequestInterface;
-use Phalcon\Encryption\Security\Random;
 use Phalcon\Encryption\Security\Exception;
+use Phalcon\Encryption\Security\Exceptions\UnknownHashAlgorithm;
+use Phalcon\Encryption\Security\Random;
+use Phalcon\Http\RequestInterface;
 use Phalcon\Session\ManagerInterface as SessionInterface;
+use Phalcon\Traits\Php\HashTrait;
+use ValueError;
 
 /**
  * This component provides a set of functions to improve the security in Phalcon
@@ -33,83 +38,105 @@ use Phalcon\Session\ManagerInterface as SessionInterface;
  *     }
  * }
  *```
+ *
+ * @phpstan-import-type encryption_hash_information from EncryptionTypes
+ * @phpstan-import-type encryption_hash_options from EncryptionTypes
  */
-class Security extends AbstractInjectionAware
+class Security extends AbstractInjectionAware implements SecurityContract
 {
+    use HashTrait;
+
+    /**
+     * @var int
+     */
     const CRYPT_ARGON2I    = 10;
+    /**
+     * @var int
+     */
     const CRYPT_ARGON2ID   = 11;
+    /**
+     * @var int
+     */
     const CRYPT_BCRYPT     = 0;
+    /**
+     * @var int
+     */
     const CRYPT_DEFAULT    = 0;
+    /**
+     * @deprecated Not implemented; resolves to bcrypt. To be removed.
+     *
+     * @var int
+     */
     const CRYPT_BLOWFISH   = 4;
+    /**
+     * @var int
+     */
     const CRYPT_BLOWFISH_A = 5;
+    /**
+     * @var int
+     */
     const CRYPT_BLOWFISH_X = 6;
+    /**
+     * @deprecated Not implemented; resolves to bcrypt. To be removed.
+     *
+     * @var int
+     */
     const CRYPT_BLOWFISH_Y = 7;
+    /**
+     * @deprecated Not implemented; resolves to bcrypt. To be removed.
+     *
+     * @var int
+     */
     const CRYPT_EXT_DES    = 2;
+    /**
+     * Weak legacy algorithm, easier to brute-force than bcrypt or Argon2. Use
+     * `CRYPT_DEFAULT` (bcrypt) or the Argon2 algorithms and rehash stored
+     * passwords on login. To be removed in a future major version.
+     *
+     * @var int
+     */
     const CRYPT_MD5        = 3;
+    /**
+     * Weak legacy algorithm, easier to brute-force than bcrypt or Argon2. Use
+     * `CRYPT_DEFAULT` (bcrypt) or the Argon2 algorithms and rehash stored
+     * passwords on login. To be removed in a future major version.
+     *
+     * @var int
+     */
     const CRYPT_SHA256     = 8;
+    /**
+     * Weak legacy algorithm, easier to brute-force than bcrypt or Argon2. Use
+     * `CRYPT_DEFAULT` (bcrypt) or the Argon2 algorithms and rehash stored
+     * passwords on login. To be removed in a future major version.
+     *
+     * @var int
+     */
     const CRYPT_SHA512     = 9;
+    /**
+     * @deprecated Not implemented; resolves to bcrypt. To be removed.
+     *
+     * @var int
+     */
     const CRYPT_STD_DES    = 1;
 
+    protected bool autoRefresh = true;
     /**
      * @var int
      */
     protected defaultHash = self::CRYPT_DEFAULT;
-
-    /**
-     * @var int
-     */
-    protected numberBytes = 16;
-
-    /**
-     * @var Random
-     */
-    protected random;
-
-    /**
-     * @var string|null
-     */
-    protected requestToken = null;
-
-    /**
-     * @var string|null
-     */
-    protected token = null;
-
-    /**
-     * @var string|null
-     */
-    protected tokenKey = null;
-
-    /**
-     * @var string
-     */
-    protected tokenKeySessionId = "$PHALCON/CSRF/KEY$";
-
-    /**
-     * @var string
-     */
-    protected tokenValueSessionId = "$PHALCON/CSRF$";
-
-    /**
-     * @var int
-     */
-    protected workFactor = 10 { get };
-
-    /**
-     * @var SessionInterface|null
-     */
-    private localSession = null;
-
-    /**
-     * @var RequestInterface|null
-     */
-    private localRequest = null;
+    protected int numberBytes = 16;
+    protected <Random> random;
+    protected ?string requestToken = null;
+    protected ?string token = null;
+    protected ?string tokenKey = null;
+    protected string tokenKeySessionId = "$PHALCON/CSRF/KEY$";
+    protected string tokenValueSessionId = "$PHALCON/CSRF$";
+    protected int workFactor = 10;
+    private ?<RequestInterface> localRequest = null;
+    private ?<SessionInterface> localSession = null;
 
     /**
      * Security constructor.
-     *
-     * @param SessionInterface|null $session
-     * @param RequestInterface|null $request
      */
     public function __construct(
         <SessionInterface> session = null,
@@ -123,12 +150,6 @@ class Security extends AbstractInjectionAware
     /**
      * Checks a plain text password and its hash version to check if the
      * password matches
-     *
-     * @param string $password
-     * @param string $passwordHash
-     * @param int    $maxPassLength
-     *
-     * @return bool
      */
     public function checkHash(
         string password,
@@ -145,12 +166,6 @@ class Security extends AbstractInjectionAware
     /**
      * Check if the CSRF token sent in the request is the same that the current
      * in session
-     *
-     * @param string|null $tokenKey
-     * @param mixed|null  $tokenValue
-     * @param bool        $destroyIfValid
-     *
-     * @return bool
      */
     public function checkToken(
         string tokenKey = null,
@@ -177,7 +192,7 @@ class Security extends AbstractInjectionAware
             return false;
         }
 
-        let equals = hash_equals(knownToken, userToken);
+        let equals = this->phpHashEquals(knownToken, userToken);
 
         /**
          * Remove the key and value of the CSRF token in session
@@ -192,31 +207,24 @@ class Security extends AbstractInjectionAware
     /**
      * Computes a HMAC
      *
-     * @param string $data
-     * @param string $key
-     * @param string $algo
-     * @param bool   $raw
-     *
-     * @return string
      * @throws Exception
      */
     public function computeHmac(
         string data,
         string key,
-        string algo,
+        string algorithm,
         bool raw = false
     ) -> string {
         var hmac;
 
-        let hmac = hash_hmac(algo, data, key, raw);
+        try {
+            let hmac = this->phpHashHmac(algorithm, data, key, raw);
+        } catch ValueError {
+            throw new UnknownHashAlgorithm(algorithm);
+        }
 
         if unlikely !hmac {
-            throw new Exception(
-                sprintf(
-                    "Unknown hashing algorithm: %s",
-                    algo
-                )
-            );
+            throw new UnknownHashAlgorithm(algorithm);
         }
 
         return hmac;
@@ -225,7 +233,7 @@ class Security extends AbstractInjectionAware
     /**
      * Removes the value of the CSRF token and key from session
      */
-    public function destroyToken() -> <Security>
+    public function destroyToken() -> <static>
     {
         var session;
 
@@ -245,8 +253,6 @@ class Security extends AbstractInjectionAware
 
     /**
      * Returns the default hash
-     *
-     * @return int
      */
     public function getDefaultHash() -> int
     {
@@ -256,9 +262,7 @@ class Security extends AbstractInjectionAware
     /**
      * Returns information regarding a hash
      *
-     * @param string $hash
-     *
-     * @return array
+     * @phpstan-return encryption_hash_information
      */
     public function getHashInformation(string hash) -> array
     {
@@ -295,35 +299,14 @@ class Security extends AbstractInjectionAware
     }
 
     /**
-     * Returns the value of the CSRF token in session
-     *
-     * @return string|null
-     */
-    public function getSessionToken() -> string | null
-    {
-        var session;
-
-        let session = this->getLocalService("session", "localSession");
-
-        if likely session {
-            return session->get(this->tokenValueSessionId);
-        }
-
-        return null;
-    }
-
-    /**
      * Generate a >22-length pseudo random string to be used as salt for
      * passwords
      *
-     * @param int $numberBytes
-     *
-     * @return string
      * @throws Exception
      */
     public function getSaltBytes(int numberBytes = 0) -> string
     {
-        var safeBytes;
+        var safeBytes = null;
 
         if !numberBytes {
             let numberBytes = this->numberBytes;
@@ -341,22 +324,54 @@ class Security extends AbstractInjectionAware
     }
 
     /**
+     * Returns the value of the CSRF token in session
+     */
+    public function getSessionToken() -> string | null
+    {
+        var session;
+
+        let session = this->getLocalService("session", "localSession");
+
+        if likely session {
+            return session->get(this->tokenValueSessionId);
+        }
+
+        return null;
+    }
+
+    /**
      * Generates a pseudo random token value to be used as input's value in a
      * CSRF check
      *
-     * @return string
      * @throws Exception
      */
     public function getToken() -> string | null
     {
-        var session;
+        var session, sessionToken;
 
         if (null === this->token) {
+            /** @var SessionInterface|null $session */
+            let session = this->getLocalService("session", "localSession");
+
+            /**
+             * When auto-refresh is disabled, reuse any existing session
+             * token instead of generating a new one. This avoids the
+             * per-request session write that backend stores (DynamoDB,
+             * Redis with billing per write, etc.) would otherwise incur.
+             */
+            if (false === this->autoRefresh && null !== session) {
+                let sessionToken = session->get(this->tokenValueSessionId);
+                if (null !== sessionToken) {
+                    let this->token        = sessionToken,
+                        this->requestToken = sessionToken;
+
+                    return this->token;
+                }
+            }
+
             let this->requestToken = this->getSessionToken(),
                 this->token        = this->random->base64Safe(this->numberBytes);
 
-            /** @var SessionInterface|null $session */
-            let session = this->getLocalService("session", "localSession");
             if (null !== session) {
                 session->set(
                     this->tokenValueSessionId,
@@ -372,17 +387,29 @@ class Security extends AbstractInjectionAware
      * Generates a pseudo random token key to be used as input's name in a CSRF
      * check
      *
-     * @return string|null
      * @throws Exception
      */
     public function getTokenKey() -> string | null
     {
-        var session;
+        var session, sessionTokenKey;
 
         if (null === this->tokenKey) {
             /** @var SessionInterface|null $session */
             let session = this->getLocalService("session", "localSession");
             if (null !== session) {
+                /**
+                 * Auto-refresh disabled: reuse the existing session value
+                 * if present, so no write occurs on read-only requests.
+                 */
+                if (false === this->autoRefresh) {
+                    let sessionTokenKey = session->get(this->tokenKeySessionId);
+                    if (null !== sessionTokenKey) {
+                        let this->tokenKey = sessionTokenKey;
+
+                        return this->tokenKey;
+                    }
+                }
+
                 let this->tokenKey = this->random->base64Safe(this->numberBytes);
                 session->set(
                     this->tokenKeySessionId,
@@ -394,13 +421,18 @@ class Security extends AbstractInjectionAware
         return this->tokenKey;
     }
 
+    public function getWorkFactor() -> int
+    {
+        return this->workFactor;
+    }
+
     /**
      * Creates a password hash using bcrypt with a pseudo random salt
      *
-     * @param string $password
-     * @param array  $options
+     * Any `defaultHash` value that is not explicitly handled (including the
+     * deprecated, unimplemented constants) resolves to bcrypt.
      *
-     * @return string
+     * @phpstan-param encryption_hash_options $options
      */
     public function hash(string password, array options = []) -> string
     {
@@ -435,16 +467,16 @@ class Security extends AbstractInjectionAware
                 let prefix = "$6$",
                     bytes  = 16;
                 break;
-            /*
-             * Blowfish hashing with a salt as follows: "$2a$", "$2x$" or
-             * "$2y$", a two digit cost parameter, "$", and 22 characters
-             * from the alphabet "./0-9A-Za-z". Using characters outside
-             * this range in the salt will cause `crypt()` to return a
-             * zero-length string. The two digit cost parameter is the
-             * base-2 logarithm of the iteration count for the underlying
-             * Blowfish-based hashing algorithm and must be in range 04-31,
-             * values outside this range will cause crypt() to fail.
-             */
+                /*
+                 * Blowfish hashing with a salt as follows: "$2a$", "$2x$" or
+                 * "$2y$", a two digit cost parameter, "$", and 22 characters
+                 * from the alphabet "./0-9A-Za-z". Using characters outside
+                 * this range in the salt will cause `crypt()` to return a
+                 * zero-length string. The two digit cost parameter is the
+                 * base-2 logarithm of the iteration count for the underlying
+                 * Blowfish-based hashing algorithm and must be in range 04-31,
+                 * values outside this range will cause crypt() to fail.
+                 */
             case self::CRYPT_BLOWFISH_A:
                 let prefix = sprintf("$2a$%s$", formatted);
                 break;
@@ -465,11 +497,11 @@ class Security extends AbstractInjectionAware
         /**
          * This is using password_hash
          *
-         * We will not provide a "salt" but let PHP calculate it.
+         * We will not provide a "salt" but let PHP calculate it. The caller's
+         * options are preserved (e.g. Argon2 `memory_cost`, `time_cost`,
+         * `threads`); only the validated `cost` is merged in.
          */
-        let options = [
-            "cost" : cost
-        ];
+        let options["cost"] = cost;
 
         let algorithm = this->processAlgorithm(),
             arguments = this->processArgonOptions(options);
@@ -479,10 +511,6 @@ class Security extends AbstractInjectionAware
 
     /**
      * Checks if a password hash is a valid bcrypt's hash
-     *
-     * @param string $passwordHash
-     *
-     * @return bool
      */
     public function isLegacyHash(string passwordHash) -> bool
     {
@@ -490,13 +518,46 @@ class Security extends AbstractInjectionAware
     }
 
     /**
-     * Sets the default hash
-     *
-     * @param int $defaultHash
-     *
-     * @return Security
+     * Forces the regeneration of the CSRF token and key, writing the new
+     * values to the session even when auto-refresh has been disabled. Useful
+     * after a successful login or any other state change where rotating the
+     * token is appropriate.
      */
-    public function setDefaultHash(int defaultHash) -> <Security>
+    public function refreshToken() -> <static>
+    {
+        var session;
+
+        let this->token        = this->random->base64Safe(this->numberBytes),
+            this->tokenKey     = this->random->base64Safe(this->numberBytes),
+            this->requestToken = null;
+
+        /** @var SessionInterface|null $session */
+        let session = this->getLocalService("session", "localSession");
+        if (null !== session) {
+            session->set(this->tokenValueSessionId, this->token);
+            session->set(this->tokenKeySessionId, this->tokenKey);
+        }
+
+        return this;
+    }
+
+    /**
+     * Toggles automatic regeneration of the CSRF token on every call to
+     * `getToken()` / `getTokenKey()`. When set to `false`, existing session
+     * values are reused (no session write), and a new token is only minted
+     * when none is present or `refreshToken()` is called explicitly.
+     */
+    public function setAutoRefresh(bool autoRefresh) -> <static>
+    {
+        let this->autoRefresh = autoRefresh;
+
+        return this;
+    }
+
+    /**
+     * Sets the default hash
+     */
+    public function setDefaultHash(int defaultHash) -> <static>
     {
         let this->defaultHash = defaultHash;
 
@@ -506,12 +567,8 @@ class Security extends AbstractInjectionAware
     /**
      * Sets a number of bytes to be generated by the openssl pseudo random
      * generator
-     *
-     * @param int $randomBytes
-     *
-     * @return Security
      */
-    public function setRandomBytes(int! randomBytes) -> <Security>
+    public function setRandomBytes(int randomBytes) -> <static>
     {
         let this->numberBytes = randomBytes;
 
@@ -520,12 +577,8 @@ class Security extends AbstractInjectionAware
 
     /**
      * Sets the work factor
-     *
-     * @param int $workFactor
-     *
-     * @return Security
      */
-    public function setWorkFactor(int workFactor) -> <Security>
+    public function setWorkFactor(int workFactor) -> <static>
     {
         let this->workFactor = workFactor;
 
@@ -533,9 +586,6 @@ class Security extends AbstractInjectionAware
     }
 
     /**
-     * @param string $name
-     * @param string $property
-     *
      * @return RequestInterface|SessionInterface|null
      */
     protected function getLocalService(string name, string property)
@@ -554,8 +604,6 @@ class Security extends AbstractInjectionAware
     /**
      * Checks the algorithm for `password_hash`. If it is argon based, it
      * returns the relevant constant
-     *
-     * @return string
      */
     private function processAlgorithm() -> string
     {
@@ -576,9 +624,8 @@ class Security extends AbstractInjectionAware
      * We check if the algorithm is Argon based. If yes, options are set for
      * `password_hash` such as `memory_cost`, `time_cost` and `threads`
      *
-     * @param array $options
-     *
-     * @return array
+     * @phpstan-param  encryption_hash_options $options
+     * @phpstan-return encryption_hash_options
      */
     private function processArgonOptions(array options) -> array
     {
@@ -611,16 +658,14 @@ class Security extends AbstractInjectionAware
      * Checks the options array for `cost`. If not defined it is set to 10.
      * It also checks the cost if it is between 4 and 31
      *
-     * @param array $options
-     *
-     * @return int
+     * @phpstan-param encryption_hash_options $options
      */
     private function processCost(array options = []) -> int
     {
         var cost;
 
         if !fetch cost, options["cost"] {
-            let cost = 10;
+            let cost = this->workFactor;
         }
 
         if cost < 4 {
@@ -634,11 +679,6 @@ class Security extends AbstractInjectionAware
         return cost;
     }
 
-    /**
-     * @param string|null $tokenKey
-     *
-     * @return string|null
-     */
     private function processTokenKey(string tokenKey = null) -> string | null
     {
         var key, session;
@@ -652,12 +692,6 @@ class Security extends AbstractInjectionAware
         return key;
     }
 
-    /**
-     * @param string      $tokenKey
-     * @param string|null $tokenValue
-     *
-     * @return string|null
-     */
     private function processUserToken(
         string tokenKey,
         string tokenValue = null

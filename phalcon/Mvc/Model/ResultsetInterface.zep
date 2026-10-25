@@ -13,11 +13,8 @@ namespace Phalcon\Mvc\Model;
 use Closure;
 use Phalcon\Messages\MessageInterface;
 use Phalcon\Mvc\ModelInterface;
-use Psr\SimpleCache\CacheInterface;
 
 /**
- * Phalcon\Mvc\Model\ResultsetInterface
- *
  * Interface for Phalcon\Mvc\Model\Resultset
  */
 interface ResultsetInterface
@@ -31,10 +28,10 @@ interface ResultsetInterface
      * Filters a resultset returning only those the developer requires
      *
      *```php
-     * $filtered = $robots->filter(
-     *     function ($robot) {
-     *         if ($robot->id < 3) {
-     *             return $robot;
+     * $filtered = $invoices->filter(
+     *     function ($invoice) {
+     *         if ($invoice->inv_id < 3) {
+     *             return $invoice;
      *         }
      *     }
      * );
@@ -45,7 +42,7 @@ interface ResultsetInterface
     /**
      * Returns the associated cache for the resultset
      */
-    public function getCache() -> <CacheInterface> | null;
+    public function getCache() -> var | null;
 
     /**
      * Get first row in the resultset
@@ -75,7 +72,7 @@ interface ResultsetInterface
     public function getType() -> int;
 
     /**
-     * Tell if the resultset if fresh or an old one cached
+     * Tell if the resultset is fresh or an old one cached
      */
     public function isFresh() -> bool;
 
@@ -90,8 +87,10 @@ interface ResultsetInterface
     public function setIsFresh(bool isFresh) -> <ResultsetInterface>;
 
     /**
-     * Returns a complete resultset as an array, if the resultset has a big number of rows
-     * it could consume more memory than currently it does.
+     * Returns a complete resultset as an array, if the resultset has a big
+     * number of rows it could consume more memory than currently it does.
+     *
+     * @phpstan-return array<array-key, mixed>
      */
     public function toArray() -> array;
 

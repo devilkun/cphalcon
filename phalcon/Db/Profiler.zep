@@ -10,7 +10,9 @@
 
 namespace Phalcon\Db;
 
+use Phalcon\Contracts\Db\DbTypes;
 use Phalcon\Db\Profiler\Item;
+use Phalcon\Db\Traits\ElapsedTimeTrait;
 
 /**
  * Instances of Phalcon\Db can generate execution profiles
@@ -62,9 +64,15 @@ use Phalcon\Db\Profiler\Item;
  * echo "Final Time: ", $profile->getFinalTime(), "\n";
  * echo "Total Elapsed Time: ", $profile->getTotalElapsedSeconds(), "\n";
  * ```
+ *
+ * @phpstan-import-type db_bind_params from DbTypes
+ * @phpstan-import-type db_bind_types from DbTypes
+ * @phpstan-import-type db_profiler_items from DbTypes
  */
 class Profiler
 {
+    use ElapsedTimeTrait;
+
     /**
      * Active Item
      *
@@ -76,15 +84,26 @@ class Profiler
      * All the Items in the active profile
      *
      * @var Item[]
+     *
+     * @phpstan-var db_profiler_items
      */
     protected allProfiles;
 
     /**
-     * Total time spent by all profiles to complete
+     * Maximum number of profiles to retain. 0 (default) keeps the
+     * original unbounded behavior; a positive value drops the oldest
+     * profile FIFO before a new one is appended.
+     *
+     * @var int
+     */
+    protected maxProfiles = 0;
+
+    /**
+     * Total time spent by all profiles to complete in nanoseconds
      *
      * @var float
      */
-    protected totalSeconds = 0;
+    protected totalNanoseconds = 0;
 
     /**
      * Returns the last profile executed in the profiler
@@ -92,6 +111,15 @@ class Profiler
     public function getLastProfile() -> <Item>
     {
         return this->activeProfile;
+    }
+
+    /**
+     * Returns the configured maximum number of retained profiles
+     * (0 = unlimited)
+     */
+    public function getMaxProfiles() -> int
+    {
+        return this->maxProfiles;
     }
 
     /**
@@ -103,11 +131,11 @@ class Profiler
     }
 
     /**
-     * Returns the total time in seconds spent by the profiles
+     * Returns the total time in nanoseconds spent by the profiles
      */
-    public function getTotalElapsedSeconds() -> double
+    public function getTotalElapsedNanoseconds() -> double
     {
-        return this->totalSeconds;
+        return this->totalNanoseconds;
     }
 
     /**
@@ -121,7 +149,7 @@ class Profiler
     /**
      * Resets the profiler, cleaning up all the profiles
      */
-    public function reset() -> <Profiler>
+    public function reset() -> <static>
     {
         let this->allProfiles = [];
 
@@ -129,24 +157,34 @@ class Profiler
     }
 
     /**
-     * Starts the profile of a SQL sentence
+     * Sets the maximum number of retained profiles. 0 disables the cap
+     * (the default; preserves the original unbounded behavior).
      */
-    public function startProfile(string sqlStatement, var sqlVariables = null, var sqlBindTypes = null) -> <Profiler>
+    public function setMaxProfiles(int maxProfiles) -> <static>
     {
+        let this->maxProfiles = maxProfiles;
+
+        return this;
+    }
+
+    /**
+     * Starts the profile of a SQL sentence
+     *
+     * @phpstan-param db_bind_params $sqlVariables
+     * @phpstan-param db_bind_types  $sqlBindTypes
+     */
+    public function startProfile(
+        string sqlStatement,
+        array sqlVariables = [],
+        array sqlBindTypes = []
+    ) -> <static> {
         var activeProfile;
 
         let activeProfile = new Item();
 
         activeProfile->setSqlStatement(sqlStatement);
-
-        if typeof sqlVariables == "array" {
-            activeProfile->setSqlVariables(sqlVariables);
-        }
-
-        if typeof sqlBindTypes == "array" {
-            activeProfile->setSqlBindTypes(sqlBindTypes);
-        }
-
+        activeProfile->setSqlVariables(sqlVariables);
+        activeProfile->setSqlBindTypes(sqlBindTypes);
         activeProfile->setInitialTime(hrtime(true));
 
         if method_exists(this, "beforeStartProfile") {
@@ -161,18 +199,23 @@ class Profiler
     /**
      * Stops the active profile
      */
-    public function stopProfile() -> <Profiler>
+    public function stopProfile() -> <static>
     {
-        var activeProfile, finalTime, initialTime;
+        var activeProfile, firstKey;
 
-        let finalTime     = hrtime(true),
-            activeProfile = <Item> this->activeProfile;
+        let activeProfile = <Item> this->activeProfile;
 
-        activeProfile->setFinalTime(finalTime);
+        activeProfile->setFinalTime(hrtime(true));
 
-        let initialTime = activeProfile->getInitialTime(),
-            this->totalSeconds = this->totalSeconds + (finalTime - initialTime),
-            this->allProfiles[] = activeProfile;
+        if this->maxProfiles > 0 && count(this->allProfiles) >= this->maxProfiles {
+            let firstKey = array_key_first(this->allProfiles);
+            if firstKey !== null {
+                unset(this->allProfiles[firstKey]);
+            }
+        }
+
+        let this->totalNanoseconds = this->totalNanoseconds + activeProfile->getTotalElapsedNanoseconds(),
+            this->allProfiles[]    = activeProfile;
 
         if method_exists(this, "afterEndProfile") {
             this->{"afterEndProfile"}(activeProfile);

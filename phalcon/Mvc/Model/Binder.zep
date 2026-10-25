@@ -4,53 +4,56 @@
  *
  * (c) Phalcon Team <team@phalcon.io>
  *
- * For the full copyright and license information, please view the
- * LICENSE.txt file that was distributed with this source code.
+ * For the full copyright and license information, please view the LICENSE.txt
+ * file that was distributed with this source code.
  */
 
 namespace Phalcon\Mvc\Model;
 
 use Closure;
+use Phalcon\Cache\Adapter\AdapterInterface;
 use Phalcon\Mvc\Controller\BindModelInterface;
 use Phalcon\Mvc\Model\Binder\BindableInterface;
-use Phalcon\Cache\Adapter\AdapterInterface;
+use Phalcon\Mvc\Model\Exceptions\HandlerMustImplementBindable;
+use Phalcon\Mvc\Model\Exceptions\InvalidGetModelNameReturn;
+use Phalcon\Mvc\Model\Exceptions\MissingMethodName;
+use Phalcon\Mvc\Model\Exceptions\MissingModelClassName;
+use Phalcon\Mvc\Model;
+use Phalcon\Mvc\ModelInterface;
 use ReflectionFunction;
 use ReflectionMethod;
+use ReflectionNamedType;
 
 /**
- * Phalcon\Mvc\Model\Binder
- *
- * This is an class for binding models into params for handler
+ * This is a class for binding models into params for handler
  */
 class Binder implements BinderInterface
 {
     /**
      * Array for storing active bound models
      *
-     * @var array
+     * @phpstan-var array<array-key, ModelInterface>
      */
-    protected boundModels = [] { get };
+    protected array boundModels = [];
 
     /**
      * Cache object used for caching parameters for model binding
-     *
-     * @var AdapterInterface|null
      */
-    protected cache;
+    protected ?<AdapterInterface> cache;
 
     /**
      * Internal cache for caching parameters for model binding during request
      *
-     * @var array
+     * @phpstan-var array<string, array<array-key, string>>
      */
-    protected internalCache = [];
+    protected array internalCache = [];
 
     /**
      * Array for original values
      *
-     * @var array
+     * @phpstan-var array<array-key, mixed>
      */
-    protected originalValues = [] { get };
+    protected array originalValues = [];
 
     /**
      * Phalcon\Mvc\Model\Binder constructor
@@ -62,17 +65,18 @@ class Binder implements BinderInterface
 
     /**
      * Bind models into params in proper handler
+     *
+     * @phpstan-param array<array-key, mixed> $params
+     * @phpstan-return array<array-key, mixed>
      */
-    public function bindToHandler(object handler, array params, string cacheKey, string! methodName = null) -> array
+    public function bindToHandler(object handler, array params, string cacheKey,  string methodName = null) -> array
     {
         var paramKey, className, boundModel, paramsCache, paramValue;
 
         let this->originalValues = [];
 
         if unlikely (!(handler instanceof Closure) && methodName === null) {
-            throw new Exception(
-                "You must specify methodName for handler or pass Closure as handler"
-            );
+            throw new MissingMethodName();
         }
 
         let this->boundModels = [];
@@ -99,13 +103,15 @@ class Binder implements BinderInterface
     }
 
     /**
-     * Find the model by param value.
+     * Return the active bound models
      *
-     * @return mixed
+     * @return array
+     *
+     * @phpstan-return array<array-key, ModelInterface>
      */
-    protected function findBoundModel(var paramValue, string className) -> var | bool
+    public function getBoundModels() -> array
     {
-        return {className}::findFirst(paramValue);
+        return this->boundModels;
     }
 
     /**
@@ -117,7 +123,41 @@ class Binder implements BinderInterface
     }
 
     /**
+     * Return the array for original values
+     *
+     * @return array
+     *
+     * @phpstan-return array<array-key, mixed>
+     */
+    public function getOriginalValues() -> array
+    {
+        return this->originalValues;
+    }
+
+    /**
+     * Gets cache instance
+     */
+    public function setCache(<AdapterInterface> cache) -> <BinderInterface>
+    {
+        let this->cache = cache;
+
+        return this;
+    }
+
+    /**
+     * Find the model by param value.
+     *
+     * @return mixed
+     */
+    protected function findBoundModel(var paramValue, string className) -> var | bool
+    {
+        return {className}::findFirst(paramValue);
+    }
+
+    /**
      * Get params classes from cache by key
+     *
+     * @phpstan-return array<array-key, string>|null
      */
     protected function getParamsFromCache(string cacheKey) -> array | null
     {
@@ -141,8 +181,11 @@ class Binder implements BinderInterface
 
     /**
      * Get modified params for handler using reflection
+     *
+     * @phpstan-param array<array-key, mixed> $params
+     * @phpstan-return array<array-key, mixed>
      */
-    protected function getParamsFromReflection(object handler, array params, string cacheKey, string! methodName) -> array
+    protected function getParamsFromReflection(object handler, array params, string cacheKey,  string methodName) -> array
     {
         var methodParams, reflection, paramKey, methodParam, className,
             realClasses = null, boundModel, cache, handlerClass,
@@ -163,9 +206,9 @@ class Binder implements BinderInterface
         let paramsKeys = array_keys(params);
 
         for paramKey, methodParam in methodParams {
-            let reflectionClass = methodParam->getClass();
+            let reflectionClass = methodParam->getType();
 
-            if !reflectionClass {
+            if !reflectionClass || !(reflectionClass instanceof ReflectionNamedType) {
                 continue;
             }
 
@@ -178,7 +221,7 @@ class Binder implements BinderInterface
             let boundModel = null;
             let paramValue = params[paramKey];
 
-            if className == "Phalcon\\Mvc\\Model" {
+            if className == Model::class {
                 if realClasses == null {
                     if handler instanceof BindModelInterface {
                         let handlerClass = get_class(handler);
@@ -186,17 +229,13 @@ class Binder implements BinderInterface
                     } elseif handler instanceof BindableInterface {
                         let realClasses = handler->getModelName();
                     } else {
-                        throw new Exception(
-                            "Handler must implement Phalcon\\Mvc\\Model\\Binder\\BindableInterface in order to use Phalcon\\Mvc\\Model as parameter"
-                        );
+                        throw new HandlerMustImplementBindable();
                     }
                 }
 
                 if typeof realClasses == "array" {
                     if unlikely !fetch className, realClasses[paramKey] {
-                        throw new Exception(
-                            "You should provide model class name for " . paramKey . " parameter"
-                        );
+                        throw new MissingModelClassName(paramKey);
                     }
 
                     let boundModel = this->findBoundModel(paramValue, className);
@@ -204,11 +243,9 @@ class Binder implements BinderInterface
                     let className = realClasses;
                     let boundModel = this->findBoundModel(paramValue, className);
                 } else {
-                    throw new Exception(
-                        "getModelName should return array or string"
-                    );
+                    throw new InvalidGetModelNameReturn();
                 }
-            } elseif is_subclass_of(className, "Phalcon\\Mvc\\Model") {
+            } elseif is_subclass_of(className, Model::class) {
                 let boundModel = this->findBoundModel(paramValue, className);
             }
 
@@ -227,15 +264,5 @@ class Binder implements BinderInterface
         let this->internalCache[cacheKey] = paramsCache;
 
         return params;
-    }
-
-    /**
-     * Gets cache instance
-     */
-    public function setCache(<AdapterInterface> cache) -> <BinderInterface>
-    {
-        let this->cache = cache;
-
-        return this;
     }
 }

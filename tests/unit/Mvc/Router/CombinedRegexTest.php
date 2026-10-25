@@ -1,0 +1,438 @@
+<?php
+
+/**
+ * This file is part of the Phalcon Framework.
+ *
+ * (c) Phalcon Team <team@phalcon.io>
+ *
+ * For the full copyright and license information, please view the LICENSE.txt
+ * file that was distributed with this source code.
+ */
+
+declare(strict_types=1);
+
+namespace Phalcon\Tests\Unit\Mvc\Router;
+
+use Phalcon\Events\Manager as EventsManager;
+use Phalcon\Talon\PHPUnit\AbstractUnitTestCase;
+use Phalcon\Tests\Unit\Mvc\Fake\RouterTrait;
+use PHPUnit\Framework\Attributes\BackupGlobals;
+use PHPUnit\Framework\Attributes\DataProvider;
+
+#[BackupGlobals(true)]
+final class CombinedRegexTest extends AbstractUnitTestCase
+{
+    use RouterTrait;
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function getAddMethods(): array
+    {
+        return [
+            'add'    => ['add'],
+            'addGet' => ['addGet'],
+        ];
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: bool}>
+     */
+    public static function getPipePatterns(): array
+    {
+        return [
+            'pipe outside a group'                 => ['/(files|products)/c|d', true],
+            'raw pipe outside a group'             => ['#^/a|/b$#u', true],
+            'pipe in a group'                      => ['/(files|products)/c', false],
+            'pipe in a placeholder'                => ['/{a:(x|y)}/b', false],
+            'pipe in a class'                      => ['#^/a[|]b$#u', false],
+            'escaped pipe'                         => ['#^/a\|b$#u', false],
+            'class with a leading bracket'         => ['#^/a[]|]b$#u', false],
+            'negated class with a leading bracket' => ['#^/a[^]|]b$#u', false],
+        ];
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: bool}>
+     */
+    public static function getShapePatterns(): array
+    {
+        return [
+            'compiled route pattern' => ['/users/{id:[0-9]+}', false],
+            'raw pattern'            => ['#^/a/([0-9]+)$#u', false],
+            'other modifier'         => ['#^/a$#ui', true],
+            'no u modifier'          => ['#^/a$#', true],
+            'lookbehind'             => ['#^/a(?<=a)$#u', false],
+            'named group'            => ['#^/a/(?<id>[0-9]+)$#u', true],
+            'quoted named group'     => ["#^/a/(?'id'[0-9]+)\$#u", true],
+        ];
+    }
+
+    /**
+     * A beforeMatch veto on a combined-regex hit falls back to the next
+     * route in reverse attach order, also when that route is in the same
+     * chunk and a later chunk has another match. The vetoing callback runs
+     * one time.
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-10-01
+     */
+    #[DataProvider('getAddMethods')]
+    public function testBeforeMatchVetoFallsBackToEarlierRouteInSameChunk(string $addMethod): void
+    {
+        $calls  = 0;
+        $router = $this->getRouter(false);
+        $router->$addMethod('/items/{name:[a-z0-9]+}', ['controller' => 'first']);
+
+        for ($index = 0; $index < 10; $index++) {
+            $router->$addMethod('/filler' . $index . '/{id:[0-9]+}', ['controller' => 'filler' . $index]);
+        }
+
+        $router->$addMethod('/items/{id:[0-9]+}', ['controller' => 'second']);
+        $router->$addMethod('/items/{slug:[a-z0-9]+}', ['controller' => 'third'])
+            ->beforeMatch(
+                static function () use (&$calls): bool {
+                    $calls++;
+
+                    return false;
+                }
+            );
+
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $router->handle('/items/5');
+
+        $this->assertTrue($router->wasMatched());
+        $this->assertSame('second', $router->getControllerName());
+        $this->assertSame(1, $calls);
+    }
+
+    /**
+     * beforeMatch returning false on a combined-regex hit vetoes the
+     * match.
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-05-21
+     */
+    public function testBeforeMatchVetoOnCombinedRegexHit(): void
+    {
+        $router = $this->getRouter(false);
+        $router->add('/users/{id:[0-9]+}', ['controller' => 'users'])
+            ->beforeMatch(static fn (): bool => false);
+
+        $router->handle('/users/42');
+
+        $this->assertFalse($router->wasMatched());
+    }
+
+    /**
+     * A beforeMatch veto on a combined-regex hit with no other match runs
+     * the callback one time.
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-10-01
+     */
+    #[DataProvider('getAddMethods')]
+    public function testBeforeMatchVetoRunsCallbackOnce(string $addMethod): void
+    {
+        $calls  = 0;
+        $router = $this->getRouter(false);
+        $router->$addMethod('/users/{id:[0-9]+}', ['controller' => 'users'])
+            ->beforeMatch(
+                static function () use (&$calls): bool {
+                    $calls++;
+
+                    return false;
+                }
+            );
+
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $router->handle('/users/42');
+
+        $this->assertFalse($router->wasMatched());
+        $this->assertSame(1, $calls);
+    }
+
+    /**
+     * 25 dynamic routes (above the 10-per-chunk threshold). A route in the
+     * second chunk must still match, and a route in the third chunk must
+     * still match.
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-05-21
+     */
+    public function testChunkingBoundary(): void
+    {
+        $router = $this->getRouter(false);
+        for ($i = 0; $i < 25; $i++) {
+            $router->add(
+                "/r{$i}/{slug:[a-z]+}",
+                ['controller' => 'route_' . $i]
+            );
+        }
+
+        // /r22 was attached as index 22. After reversing the alternatives,
+        // the latest 10 attached (24..15) form chunk 0; r22 is in chunk 0.
+        $router->handle('/r22/widget');
+        $this->assertSame('route_22', $router->getControllerName());
+
+        // /r2 was attached as index 2. After reversing, it lands in chunk
+        // 2 (positions 20..24 of the reversed list).
+        $router->handle('/r2/widget');
+        $this->assertSame('route_2', $router->getControllerName());
+    }
+
+    /**
+     * With 25 catch-all routes attached, the latest-attached one wins
+     * regardless of which chunk it lives in (chunk 0 is tried first by
+     * design).
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-05-21
+     */
+    public function testChunkingPreservesReverseAttachOrder(): void
+    {
+        $router = $this->getRouter(false);
+        for ($i = 0; $i < 25; $i++) {
+            $router->add('/{anything' . $i . ':[a-z]+}', ['controller' => 'route_' . $i]);
+        }
+
+        $router->handle('/about');
+
+        $this->assertSame('route_24', $router->getControllerName());
+    }
+
+    /**
+     * Converters must run on a combined-regex hit.
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-05-21
+     */
+    public function testConverterRunsAfterCombinedRegexMatch(): void
+    {
+        $router = $this->getRouter(false);
+        $router->add('/users/{id:[0-9]+}', ['controller' => 'users', 'id' => 1])
+            ->convert('id', static fn (string $v): int => (int) $v);
+
+        $router->handle('/users/42');
+
+        $params = $router->getParams();
+        $this->assertSame(42, $params['id']);
+    }
+
+    /**
+     * When an events manager is attached, the combined regex must be
+     * bypassed so per-route events continue to fire.
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-05-21
+     */
+    public function testEventsManagerDisablesCombinedRegex(): void
+    {
+        $router  = $this->getRouter(false);
+        $fired   = [];
+        $manager = new EventsManager();
+        $manager->attach('router', static function ($event) use (&$fired) {
+            $fired[] = $event->getType();
+        });
+        $router->setEventsManager($manager);
+
+        $router->add('/users/{id:[0-9]+}', ['controller' => 'users']);
+        $router->add('/products/{slug:[a-z-]+}', ['controller' => 'products']);
+
+        $router->handle('/users/42');
+
+        $this->assertContains('beforeCheckRoute', $fired);
+        $this->assertContains('matchedRoute', $fired);
+    }
+
+    /**
+     * The presence of a hostname-constrained route in the bucket disables
+     * combined regex for that bucket - reverse-attach order with the
+     * hostname route is preserved by falling back to the per-route loop.
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-05-21
+     */
+    public function testHostnameRouteDisablesCombinedRegex(): void
+    {
+        $router = $this->getRouter(false);
+        $router->add('/{anything:[a-z]+}', ['controller' => 'catchAll']);
+        $router->add('/about', ['controller' => 'about'])
+            ->setHostname('admin.example.com');
+
+        $_SERVER['HTTP_HOST'] = 'www.example.com';
+        $router->handle('/about');
+
+        // about route's hostname does not match; catchAll wins.
+        $this->assertSame('catchAll', $router->getControllerName());
+    }
+
+    /**
+     * Two regex routes that both match the same URI; the later-attached
+     * one must win (reverse-iteration semantics preserved by the combined
+     * regex via alternative-order reversal).
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-05-21
+     */
+    public function testLaterAttachedDynamicRouteWins(): void
+    {
+        $router = $this->getRouter(false);
+        $router->add('/{anything:[a-z]+}', ['controller' => 'first']);
+        $router->add('/{anythingElse:[a-z]+}', ['controller' => 'second']);
+
+        $router->handle('/about');
+
+        $this->assertSame('second', $router->getControllerName());
+    }
+
+    /**
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-05-21
+     */
+    public function testMatchesFirstRoute(): void
+    {
+        $router = $this->getRouter(false);
+        $router->add('/products/{slug:[a-z-]+}', ['controller' => 'products']);
+        $router->add('/users/{id:[0-9]+}', ['controller' => 'users']);
+
+        $router->handle('/users/42');
+
+        $this->assertTrue($router->wasMatched());
+        $this->assertSame('users', $router->getControllerName());
+    }
+
+    /**
+     * The matches of a combined-regex hit are the matches of the route
+     * pattern. The internal MARK label is not in them.
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-10-01
+     */
+    #[DataProvider('getAddMethods')]
+    public function testMatchesHaveNoMarkLabel(string $addMethod): void
+    {
+        $router = $this->getRouter(false);
+        $router->$addMethod('/users/{id:[0-9]+}', ['controller' => 'users', 'id' => 1]);
+
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $router->handle('/users/42');
+
+        $this->assertSame([0 => '/users/42', 1 => '42'], $router->getMatches());
+    }
+
+    /**
+     * Named-group captures must reach the matched route's paths map even
+     * after group renumbering through (?|...) branch reset.
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-05-21
+     */
+    public function testNamedCapturesReachPaths(): void
+    {
+        $router = $this->getRouter(false);
+        $router->add('/products/{slug:[a-z-]+}', ['controller' => 'products', 'slug' => 1]);
+
+        $router->handle('/products/widget');
+
+        $params = $router->getParams();
+        $this->assertSame('widget', $params['slug']);
+    }
+
+    /**
+     * A group name of a raw route does not go into the matches of a
+     * different route.
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-10-02
+     */
+    #[DataProvider('getAddMethods')]
+    public function testNamedGroupDoesNotLeakIntoOtherRoutes(string $addMethod): void
+    {
+        $router = $this->getRouter(false);
+        $router->$addMethod('#^/a/(?P<id>[0-9]+)$#u', ['controller' => 'a']);
+        $router->$addMethod('/b/{slug}', ['controller' => 'b']);
+
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $router->handle('/b/x');
+
+        $matches = $router->getMatches();
+
+        $this->assertSame('b', $router->getControllerName());
+        $this->assertArrayNotHasKey('id', $matches);
+        $this->assertSame('x', $matches[1]);
+    }
+
+    /**
+     * Raw routes with different group names do not cause a warning.
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-10-02
+     */
+    #[DataProvider('getAddMethods')]
+    public function testNamedGroupsWithDifferentNamesDoNotWarn(string $addMethod): void
+    {
+        $router = $this->getRouter(false);
+        $router->$addMethod('#^/users/(?P<id>[0-9]+)$#u', ['controller' => 'users']);
+        $router->$addMethod('#^/posts/(?P<slug>[a-z]+)$#u', ['controller' => 'posts']);
+
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+
+        $warnings = [];
+        set_error_handler(
+            static function (int $number, string $message) use (&$warnings): bool {
+                $warnings[] = $message;
+
+                return true;
+            }
+        );
+
+        try {
+            $router->handle('/posts/abc');
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertSame([], $warnings);
+        $this->assertSame('posts', $router->getControllerName());
+        $this->assertSame([0 => '/posts/abc', 'slug' => 'abc', 1 => 'abc'], $router->getMatches());
+    }
+
+    /**
+     * A "|" outside a group turns off the combined regex of the bucket. A
+     * "|" in a group, in a character class or escaped does not.
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-10-02
+     */
+    #[DataProvider('getPipePatterns')]
+    public function testPipeOutsideGroupDisablesCombinedRegex(string $pattern, bool $disabled): void
+    {
+        $router = $this->getRouter(false);
+        $router->addGet($pattern, ['controller' => 'pipe']);
+
+        $dump = $router->buildDispatcherDump();
+
+        $this->assertSame($disabled, isset($dump['combinedRegexDisabled']['GET']));
+        $this->assertSame(!$disabled, isset($dump['combinedRegexByMethod']['GET']));
+    }
+
+    /**
+     * A bucket is combined only for patterns of the shape "#^<body>$#u"
+     * with no named group.
+     *
+     * @author Phalcon Team <team@phalcon.io>
+     * @since  2026-10-03
+     */
+    #[DataProvider('getShapePatterns')]
+    public function testShapeOfPatternDisablesCombinedRegex(string $pattern, bool $disabled): void
+    {
+        $router = $this->getRouter(false);
+        $router->addGet($pattern, ['controller' => 'shape']);
+
+        $dump = $router->buildDispatcherDump();
+
+        $this->assertSame($disabled, isset($dump['combinedRegexDisabled']['GET']));
+        $this->assertSame(!$disabled, isset($dump['combinedRegexByMethod']['GET']));
+    }
+}

@@ -20,18 +20,12 @@ use Phalcon\Mvc\ModelInterface;
  */
 class Failed extends Exception
 {
-    /**
-     * @var ModelInterface|null
-     */
-    protected record = null;
+    protected ?<ModelInterface> record = null;
 
     /**
-     * Phalcon\Mvc\Model\Transaction\Failed constructor
-     *
-     * @param string message
-     * @param ModelInterface|null record
+     * Constructor
      */
-    public function __construct(string! message, <ModelInterface> record = null)
+    public function __construct(string message, <ModelInterface> record = null)
     {
         let this->record = record;
 
@@ -40,10 +34,8 @@ class Failed extends Exception
 
     /**
      * Returns validation record messages which stop the transaction
-     *
-     * @return ModelInterface
      */
-    public function getRecord() -> <ModelInterface>
+    public function getRecord() -> <ModelInterface> | null
     {
         return this->record;
     }
@@ -51,9 +43,9 @@ class Failed extends Exception
     /**
      * Returns validation record messages which stop the transaction
      *
-     * @return MessageInterface[]
+     * @return MessageInterface[]|string
      */
-    public function getRecordMessages() -> <MessageInterface[]>
+    public function getRecordMessages() -> array | string
     {
         var record;
 

@@ -10,22 +10,10 @@
 
 namespace Phalcon\Forms\Element;
 
-use Phalcon\Tag;
-
 /**
- * Phalcon\Forms\Element\Password
- *
  * Component INPUT[type=password] for forms
  */
 class Password extends AbstractElement
 {
-    /**
-     * Renders the element widget returning HTML
-     */
-    public function render(array attributes = []) -> string
-    {
-        return Tag::passwordField(
-            this->prepareAttributes(attributes)
-        );
-    }
+    protected string method = "inputPassword";
 }

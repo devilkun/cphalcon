@@ -15,7 +15,6 @@ namespace Phalcon\Encryption\Security;
  *
  * Exceptions thrown in Phalcon\Security will use this class
  */
-class Exception extends \Phalcon\Exception
+class Exception extends \Exception
 {
-
 }

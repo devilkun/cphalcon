@@ -10,10 +10,28 @@
 
 namespace Phalcon\Encryption;
 
+use Phalcon\Contracts\Encryption\EncryptionTypes;
 use Phalcon\Encryption\Crypt\CryptInterface;
+use Phalcon\Encryption\Crypt\Exception\DecryptionFailed;
+use Phalcon\Encryption\Crypt\Exception\EmptyDecryptionKey;
+use Phalcon\Encryption\Crypt\Exception\EmptyEncryptionKey;
+use Phalcon\Encryption\Crypt\Exception\EncryptionFailed;
 use Phalcon\Encryption\Crypt\Exception\Exception;
+use Phalcon\Encryption\Crypt\Exception\InvalidAuthTagLength;
+use Phalcon\Encryption\Crypt\Exception\InvalidDecryptLength;
+use Phalcon\Encryption\Crypt\Exception\InvalidPaddingSize;
+use Phalcon\Encryption\Crypt\Exception\IvLengthCalculationFailed;
 use Phalcon\Encryption\Crypt\Exception\Mismatch;
+use Phalcon\Encryption\Crypt\Exception\MissingAuthData;
+use Phalcon\Encryption\Crypt\Exception\MissingOpensslExtension;
+use Phalcon\Encryption\Crypt\Exception\RandomBytesGenerationFailed;
+use Phalcon\Encryption\Crypt\Exception\UnsupportedAlgorithm;
 use Phalcon\Encryption\Crypt\PadFactory;
+use Phalcon\Traits\Php\Base64Trait;
+use Phalcon\Traits\Php\HashTrait;
+use Phalcon\Traits\Php\InfoTrait;
+use Phalcon\Traits\Php\OpensslTrait;
+use Throwable;
 
 /**
  * Provides encryption capabilities to Phalcon applications.
@@ -33,95 +51,100 @@ use Phalcon\Encryption\Crypt\PadFactory;
  *
  * echo $crypt->decrypt($encrypted, $key);
  * ```
+ *
+ * @phpstan-import-type encryption_cipher_list from EncryptionTypes
+ * @phpstan-import-type encryption_hash_algorithms from EncryptionTypes
+ * @phpstan-import-type encryption_hash_length_cache from EncryptionTypes
  */
 class Crypt implements CryptInterface
 {
+    use Base64Trait;
+    use HashTrait;
+    use InfoTrait;
+    use OpensslTrait;
+
     /**
-     * Defaults
+     * @var string
      */
     const DEFAULT_ALGORITHM = "sha256";
+    /**
+     * @var string
+     */
     const DEFAULT_CIPHER    = "aes-256-cfb";
 
     /**
      * Padding
+     *
+     * @var int
      */
     const PADDING_ANSI_X_923     = 1;
-    const PADDING_DEFAULT        = 0;
-    const PADDING_ISO_10126      = 3;
-    const PADDING_ISO_IEC_7816_4 = 4;
-    const PADDING_PKCS7          = 2;
-    const PADDING_SPACE          = 6;
-    const PADDING_ZERO           = 5;
-
-    /**
-     * @var string
-     */
-    protected authData = "";
-
-    /**
-     * @var string
-     */
-    protected authTag = "";
-
     /**
      * @var int
      */
-    protected authTagLength = 16;
+    const PADDING_DEFAULT        = 0;
+    /**
+     * @var int
+     */
+    const PADDING_ISO_10126      = 3;
+    /**
+     * @var int
+     */
+    const PADDING_ISO_IEC_7816_4 = 4;
+    /**
+     * @var int
+     */
+    const PADDING_PKCS7          = 2;
+    /**
+     * @var int
+     */
+    const PADDING_SPACE          = 6;
+    /**
+     * @var int
+     */
+    const PADDING_ZERO           = 5;
 
+    protected string authData = "";
+    protected string authTag = "";
+    protected int authTagLength = 16;
     /**
      * Available cipher methods.
      *
-     * @var array
+     * @phpstan-var encryption_cipher_list
      */
-    protected availableCiphers = [];
-
+    protected array availableCiphers = [];
     /**
      * @var string
      */
     protected cipher = self::DEFAULT_CIPHER;
-
     /**
      * The name of hashing algorithm.
      *
      * @var string
      */
     protected hashAlgorithm = self::DEFAULT_ALGORITHM;
-
+    /**
+     * Memoized `strlen(hash($algo, "", true))` results, keyed by
+     * algorithm name. The hash output length is deterministic for a
+     * given algorithm, so this collapses the per-decrypt strlen+hash
+     * call to a single hash lookup after warm-up.
+     *
+     * @phpstan-var encryption_hash_length_cache
+     */
+    protected array hashLengthCache = [];
     /**
      * The cipher iv length.
-     *
-     * @var int
      */
-    protected ivLength = 16;
-
-    /**
-     * @var string
-     */
-    protected key = "";
-
-    /**
-     * @var int
-     */
-    protected padding = 0;
-
-    /**
-     * @var PadFactory
-     */
-    protected padFactory;
-
+    protected int ivLength = 16;
+    protected string key = "";
+    protected int padding = 0;
+    protected <PadFactory> padFactory;
     /**
      * Whether calculating message digest enabled or not.
-     *
-     * @var bool
      */
-    protected useSigning = true;
+    protected bool useSigning = true;
 
     /**
      * Crypt constructor.
-     *
-     * @param string          $cipher
-     * @param bool            $useSigning
-     * @param PadFactory|null $padFactory
      *
      * @throws Exception
      */
@@ -154,17 +177,14 @@ class Crypt implements CryptInterface
      * );
      * ```
      *
-     * @param string      $input
-     * @param string|null $key
-     *
-     * @return string
      * @throws Exception
+     * @throws InvalidDecryptLength
      * @throws Mismatch
      */
     public function decrypt(string input, string key = null) -> string
     {
         var blockSize, cipher, cipherText, decrypted, decryptKey, digest,
-            hashAlgorithm, hashLength, iv, ivLength, mode, padded;
+            hashAlgorithm, hashLength, iv, ivLength, mode;
 
         let decryptKey = this->key;
         if true !== empty(key) {
@@ -172,13 +192,17 @@ class Crypt implements CryptInterface
         }
 
         if true === empty(decryptKey) {
-            throw new Exception("Decryption key cannot be empty");
+            throw new EmptyDecryptionKey();
         }
 
         let cipher   = this->cipher,
             ivLength = this->ivLength;
 
         this->checkCipherHashIsAvailable(cipher, "cipher");
+
+        if true !== this->isValidDecryptLength(input) {
+            throw new InvalidDecryptLength();
+        }
 
         let mode      = this->getMode(),
             blockSize = this->getBlockSize(mode),
@@ -190,11 +214,55 @@ class Crypt implements CryptInterface
         let digest        = "",
             hashAlgorithm = this->getHashAlgorithm();
         if true === this->useSigning {
-            let hashLength = strlen(hash(hashAlgorithm, "", true)),
-                digest     = mb_substr(input, ivLength, hashLength, "8bit"),
+            if !fetch hashLength, this->hashLengthCache[hashAlgorithm] {
+                let hashLength = strlen(this->phpHash(hashAlgorithm, "", true));
+                let this->hashLengthCache[hashAlgorithm] = hashLength;
+            }
+            let digest     = mb_substr(input, ivLength, hashLength, "8bit"),
                 cipherText = mb_substr(input, ivLength + hashLength, null, "8bit");
         } else {
             let cipherText = mb_substr(input, ivLength, null, "8bit");
+        }
+
+        if true === this->useSigning {
+            /**
+             * Blind the CBC padding oracle (CWE-649): an OpenSSL padding
+             * failure and an HMAC mismatch must be indistinguishable. Tolerate
+             * a decrypt failure, always compute the HMAC (over the padded
+             * plaintext, before unpadding) so the timing does not leak which
+             * one happened, and report a single generic error. On a failure
+             * the HMAC runs over a dummy of the ciphertext length, so the
+             * amount of work is the same on both paths. hash_equals() keeps
+             * the comparison constant-time.
+             */
+            try {
+                let decrypted = this->decryptGcmCcmAuth(
+                    mode,
+                    cipherText,
+                    decryptKey,
+                    iv
+                );
+            } catch DecryptionFailed {
+                let decrypted = false;
+            }
+
+            if true !== this->phpHashEquals(
+                    this->phpHashHmac(
+                        hashAlgorithm,
+                        false === decrypted ? str_repeat(chr(0), strlen(cipherText)) : decrypted,
+                        decryptKey,
+                        true
+                    ),
+                    digest
+                ) || false === decrypted {
+                throw new Mismatch("Hash does not match.");
+            }
+
+            return this->decryptGetUnpadded(
+                mode,
+                blockSize,
+                decrypted
+            );
         }
 
         let decrypted = this->decryptGcmCcmAuth(
@@ -204,38 +272,16 @@ class Crypt implements CryptInterface
             iv
         );
 
-        /**
-         *  The variable below keeps the string (not unpadded). It will be used
-         +         * to compare the hash if we use a digest (signed)
-         */
-        let padded = decrypted;
-
-        let decrypted = this->decryptGetUnpadded(
+        return this->decryptGetUnpadded(
             mode,
             blockSize,
             decrypted
         );
-
-        if true === this->useSigning {
-            /**
-             * Checks on the decrypted message digest using the HMAC method.
-             */
-            if digest !== hash_hmac(hashAlgorithm, padded, decryptKey, true) {
-                throw new Mismatch("Hash does not match.");
-            }
-        }
-
-        return decrypted;
     }
 
     /**
      * Decrypt a text that is coded as a base64 string.
      *
-     * @param string     $input
-     * @param mixed|null $key
-     * @param bool       $safe
-     *
-     * @return string
      * @throws Exception
      * @throws Mismatch
      */
@@ -245,8 +291,7 @@ class Crypt implements CryptInterface
         bool safe = false
     ) -> string {
         if safe {
-            let input = strtr(input, "-_", "+/")
-                . substr("===", (strlen(input) + 3) % 4);
+            return this->decrypt(this->doDecodeUrl(input), key);
         }
 
         return this->decrypt(base64_decode(input), key);
@@ -262,10 +307,6 @@ class Crypt implements CryptInterface
      * );
      * ```
      *
-     * @param string      $input
-     * @param string|null $key
-     *
-     * @return string
      * @throws Exception
      */
     public function encrypt(string input, string key = null) -> string
@@ -279,7 +320,7 @@ class Crypt implements CryptInterface
         }
 
         if true === empty(encryptKey) {
-            throw new Exception("Encryption key cannot be empty");
+            throw new EmptyEncryptionKey();
         }
 
         let cipher   = this->cipher,
@@ -288,11 +329,12 @@ class Crypt implements CryptInterface
         this->checkCipherHashIsAvailable(cipher, "cipher");
 
         let mode      = this->getMode(),
-            blockSize = this->getBlockSize(mode),
-            iv        = this->phpOpensslRandomPseudoBytes(ivLength);
+            blockSize = this->getBlockSize(mode);
 
-        if false === iv {
-            throw new Exception("Cannot calculate Random Pseudo Bytes");
+        try {
+            let iv = this->phpOpensslRandomPseudoBytes(ivLength);
+        } catch Throwable {
+            throw new RandomBytesGenerationFailed();
         }
 
         let padded = this->encryptGetPadded(mode, input, blockSize);
@@ -304,7 +346,7 @@ class Crypt implements CryptInterface
         let encrypted = this->encryptGcmCcm(mode, padded, encryptKey, iv);
 
         if true === this->useSigning {
-            let digest = hash_hmac(
+            let digest = this->phpHashHmac(
                 this->getHashAlgorithm(),
                 padded,
                 encryptKey,
@@ -320,11 +362,6 @@ class Crypt implements CryptInterface
     /**
      * Encrypts a text returning the result as a base64 string.
      *
-     * @param string     $input
-     * @param mixed|null $key
-     * @param bool       $safe
-     *
-     * @return string
      * @throws Exception
      */
     public function encryptBase64(
@@ -349,19 +386,7 @@ class Crypt implements CryptInterface
     }
 
     /**
-     * Returns a list of available ciphers.
-     *
-     * @return array
-     */
-    public function getAvailableCiphers() -> array
-    {
-        return this->availableCiphers;
-    }
-
-    /**
      * Returns the auth data
-     *
-     * @return string
      */
     public function getAuthData() -> string
     {
@@ -370,8 +395,6 @@ class Crypt implements CryptInterface
 
     /**
      * Returns the auth tag
-     *
-     * @return string
      */
     public function getAuthTag() -> string
     {
@@ -380,8 +403,6 @@ class Crypt implements CryptInterface
 
     /**
      * Returns the auth tag length
-     *
-     * @return int
      */
     public function getAuthTagLength() -> int
     {
@@ -389,9 +410,19 @@ class Crypt implements CryptInterface
     }
 
     /**
+     * Returns a list of available ciphers.
+     *
+     * @phpstan-return encryption_cipher_list
+     */
+    public function getAvailableCiphers() -> array
+    {
+        return this->availableCiphers;
+    }
+
+    /**
      * Return a list of registered hashing algorithms suitable for hash_hmac.
      *
-     * @return array
+     * @phpstan-return encryption_hash_algorithms
      */
     public function getAvailableHashAlgorithms() -> array
     {
@@ -403,19 +434,7 @@ class Crypt implements CryptInterface
     }
 
     /**
-     * Get the name of hashing algorithm.
-     *
-     * @return string
-     */
-    public function getHashAlgorithm() -> string
-    {
-        return this->hashAlgorithm;
-    }
-
-    /**
      * Returns the current cipher
-     *
-     * @return string
      */
     public function getCipher() -> string
     {
@@ -423,9 +442,15 @@ class Crypt implements CryptInterface
     }
 
     /**
+     * Get the name of hashing algorithm.
+     */
+    public function getHashAlgorithm() -> string
+    {
+        return this->hashAlgorithm;
+    }
+
+    /**
      * Returns the encryption key
-     *
-     * @return string
      */
     public function getKey() -> string
     {
@@ -433,10 +458,22 @@ class Crypt implements CryptInterface
     }
 
     /**
-     * @param string $data
-     *
-     * @return CryptInterface
+     * Returns if the input length for decryption is valid or not
+     * (number of bytes required by the cipher).
      */
+    public function isValidDecryptLength(string input) -> bool
+    {
+        var length;
+
+        let length = this->phpOpensslCipherIvLength(this->cipher);
+
+        if length === false {
+            return false;
+        }
+
+        return length <= strlen(input);
+    }
+
     public function setAuthData(string data) -> <CryptInterface>
     {
         let this->authData = data;
@@ -444,11 +481,6 @@ class Crypt implements CryptInterface
         return this;
     }
 
-    /**
-     * @param string $tag
-     *
-     * @return CryptInterface
-     */
     public function setAuthTag(string tag) -> <CryptInterface>
     {
         let this->authTag = tag;
@@ -457,12 +489,14 @@ class Crypt implements CryptInterface
     }
 
     /**
-     * @param int $length
-     *
-     * @return CryptInterface
+     * @throws InvalidAuthTagLength
      */
     public function setAuthTagLength(int length) -> <CryptInterface>
     {
+        if length < 4 || length > 16 {
+            throw new InvalidAuthTagLength();
+        }
+
         let this->authTagLength = length;
 
         return this;
@@ -471,9 +505,6 @@ class Crypt implements CryptInterface
     /**
      * Sets the cipher algorithm for data encryption and decryption.
      *
-     * @param string $cipher
-     *
-     * @return CryptInterface
      * @throws Exception
      */
     public function setCipher(string cipher) -> <CryptInterface>
@@ -482,6 +513,20 @@ class Crypt implements CryptInterface
 
         let this->ivLength = this->getIvLength(cipher),
             this->cipher   = cipher;
+
+        return this;
+    }
+
+    /**
+     * Set the name of hashing algorithm.
+     *
+     * @throws Exception
+     */
+    public function setHashAlgorithm(string hashAlgorithm) -> <static>
+    {
+        this->checkCipherHashIsAvailable(hashAlgorithm, "hash");
+
+        let this->hashAlgorithm = hashAlgorithm;
 
         return this;
     }
@@ -500,10 +545,6 @@ class Crypt implements CryptInterface
      *
      * Good key:
      * "T4\xb1\x8d\xa9\x98\x05\\\x8c\xbe\x1d\x07&[\x99\x18\xa4~Lc1\xbeW\xb3"
-     *
-     * @param string $key
-     *
-     * @return CryptInterface
      */
     public function setKey(string key) -> <CryptInterface>
     {
@@ -513,28 +554,7 @@ class Crypt implements CryptInterface
     }
 
     /**
-     * Set the name of hashing algorithm.
-     *
-     * @param string $hashAlgorithm
-     *
-     * @return CryptInterface
-     * @throws Exception
-     */
-    public function setHashAlgorithm(string hashAlgorithm) -> <CryptInterface>
-    {
-        this->checkCipherHashIsAvailable(hashAlgorithm, "hash");
-
-        let this->hashAlgorithm = hashAlgorithm;
-
-        return this;
-    }
-
-    /**
      * Changes the padding scheme used.
-     *
-     * @param int $scheme
-     *
-     * @return CryptInterface
      */
     public function setPadding(int scheme) -> <CryptInterface>
     {
@@ -545,10 +565,6 @@ class Crypt implements CryptInterface
 
     /**
      * Sets if the calculating message digest must used.
-     *
-     * @param bool $useSigning
-     *
-     * @return CryptInterface
      */
     public function useSigning(bool useSigning) -> <CryptInterface>
     {
@@ -560,16 +576,13 @@ class Crypt implements CryptInterface
     /**
      * Checks if a cipher or a hash algorithm is available
      *
-     * @param string $cipher
-     * @param string $type
-     *
      * @throws Exception
      */
     protected function checkCipherHashIsAvailable(string cipher, string type) -> void
     {
         var available, lower, method;
 
-        if "hash" === cipher {
+        if "hash" === type {
             let method = "getAvailableHashAlgorithms";
         } else {
             let method = "getAvailableCiphers";
@@ -577,14 +590,8 @@ class Crypt implements CryptInterface
 
         let available = this->{method}(),
             lower     = mb_strtolower(cipher);
-        if true !== isset(available[lower]) {
-            throw new Exception(
-                sprintf(
-                    "The %s algorithm '%s' is not supported on this system.",
-                    type,
-                    cipher
-                )
-            );
+        if true !== in_array(lower, available) {
+            throw new UnsupportedAlgorithm(type, cipher);
         }
     }
 
@@ -592,12 +599,6 @@ class Crypt implements CryptInterface
      * Pads texts before encryption. See
      * [cryptopad](https://www.di-mgt.com.au/cryptopad.html)
      *
-     * @param string $input
-     * @param string $mode
-     * @param int    $blockSize
-     * @param int    $paddingType
-     *
-     * @return string
      * @throws Exception
      */
     protected function cryptPadText(
@@ -611,13 +612,11 @@ class Crypt implements CryptInterface
         let padding     = "",
             paddingSize = 0;
 
-        if true === this->checkIsMode(["cbc", "ecb"], mode) {
-            let paddingSize = blockSize - (mb_strlen(input) % blockSize);
+        if true === this->checkIsMode(["cbc"], mode) {
+            let paddingSize = blockSize - (strlen(input) % blockSize);
 
             if paddingSize >= 256 || paddingSize < 0 {
-                throw new Exception(
-                    "Padding size cannot be less than 0 or greater than 256"
-                );
+                throw new InvalidPaddingSize();
             }
 
             let service = this->padFactory->padNumberToService(paddingType),
@@ -638,12 +637,6 @@ class Crypt implements CryptInterface
      * If the function detects that the text was not padded, it will return it
      * unmodified.
      *
-     * @param string $input
-     * @param string $mode
-     * @param int    $blockSize
-     * @param int    $paddingType
-     *
-     * @return string
      * @throws Exception
      */
     protected function cryptUnpadText(
@@ -660,7 +653,7 @@ class Crypt implements CryptInterface
         if (
             length > 0 &&
             (length % blockSize === 0) &&
-            true === this->checkIsMode(["cbc", "ecb"], mode)
+            true === this->checkIsMode(["cbc"], mode)
         ) {
             let service     = this->padFactory->padNumberToService(paddingType),
                 paddingSize = this->padFactory->newInstance(service)
@@ -687,39 +680,6 @@ class Crypt implements CryptInterface
     }
 
     /**
-     * @param string $mode
-     * @param int    $blockSize
-     * @param string $decrypted
-     *
-     * @return string
-     */
-    protected function decryptGetUnpadded(
-        string mode,
-        int blockSize,
-        string decrypted
-    ) -> string {
-        var decrypted, padding;
-
-        if true === this->checkIsMode(["cbc", "ecb"], mode) {
-            let padding   = this->padding,
-                decrypted = this->cryptUnpadText(
-                    decrypted,
-                    mode,
-                    blockSize,
-                    padding
-                );
-        }
-
-        return decrypted;
-    }
-
-    /**
-     * @param string $mode
-     * @param string $cipherText
-     * @param string $decryptKey
-     * @param string $iv
-     *
-     * @return string
      * @throws Exception
      */
     protected function decryptGcmCcmAuth(
@@ -728,15 +688,17 @@ class Crypt implements CryptInterface
         string decryptKey,
         string iv
     ) -> string {
-        var authData, authTag, authTagLength, cipher, encrypted, decrypted;
+        var authData, authTag, authTagLength, cipher, cipherLength, encrypted,
+            decrypted;
 
         let cipher = this->cipher;
 
         if true === this->checkIsMode(["ccm", "gcm"], mode) {
             let authData      = this->authData,
                 authTagLength = this->authTagLength,
-                authTag       = substr(cipherText, -authTagLength),
-                encrypted     = str_replace(authTag, "", cipherText);
+                cipherLength  = strlen(cipherText),
+                authTag       = substr(cipherText, cipherLength - authTagLength),
+                encrypted     = substr(cipherText, 0, cipherLength - authTagLength);
 
             let decrypted = openssl_decrypt(
                 encrypted,
@@ -758,42 +720,34 @@ class Crypt implements CryptInterface
         }
 
         if (false === decrypted) {
-            throw new Exception("Could not decrypt data");
+            throw new DecryptionFailed();
         }
 
         return decrypted;
     }
 
-    /**
-     * @param string $mode
-     * @param string $input
-     * @param int    $blockSize
-     *
-     * @return string
-     * @throws Exception
-     */
-    protected function encryptGetPadded(
+    protected function decryptGetUnpadded(
         string mode,
-        string input,
-        int blockSize
+        int blockSize,
+        string decrypted
     ) -> string {
-        if (
-            0 !== this->padding &&
-            true === this->checkIsMode(["cbc", "ecb"], mode)
-        ) {
-            return this->cryptPadText(input, mode, blockSize, this->padding);
+        var localDecrypted, padding;
+
+        let localDecrypted = decrypted;
+        if true === this->checkIsMode(["cbc"], mode) {
+            let padding   = this->padding,
+                localDecrypted = this->cryptUnpadText(
+                    decrypted,
+                    mode,
+                    blockSize,
+                    padding
+                );
         }
 
-        return input;
+        return localDecrypted;
     }
 
     /**
-     * @param string $mode
-     * @param string $padded
-     * @param string $encryptKey
-     * @param string $iv
-     *
-     * @return string
      * @throws Exception
      */
     protected function encryptGcmCcm(
@@ -815,9 +769,7 @@ class Crypt implements CryptInterface
             let authData = this->authData;
 
             if true === empty(authData) {
-                throw new Exception(
-                    "Auth data must be provided when using AEAD mode"
-                );
+                throw new MissingAuthData();
             }
 
             let authTag       = this->authTag,
@@ -846,7 +798,7 @@ class Crypt implements CryptInterface
         }
 
         if (false === encrypted) {
-            throw new Exception("Could not encrypt data");
+            throw new EncryptionFailed();
         }
 
         /**
@@ -857,18 +809,35 @@ class Crypt implements CryptInterface
     }
 
     /**
-     * Initialize available cipher algorithms.
-     *
-     * @return Crypt
      * @throws Exception
      */
-    protected function initializeAvailableCiphers() -> <Crypt>
+    protected function encryptGetPadded(
+        string mode,
+        string input,
+        int blockSize
+    ) -> string {
+        if (
+            0 !== this->padding &&
+            true === this->checkIsMode(["cbc"], mode)
+        ) {
+            return this->cryptPadText(input, mode, blockSize, this->padding);
+        }
+
+        return input;
+    }
+
+    /**
+     * Initialize available cipher algorithms.
+     *
+     * @throws Exception
+     */
+    protected function initializeAvailableCiphers() -> <static>
     {
         var available, cipher;
         array allowed;
 
         if true !== this->phpFunctionExists("openssl_get_cipher_methods") {
-            throw new Exception("This class requires the openssl extension for PHP");
+            throw new MissingOpensslExtension();
         }
 
         let available = openssl_get_cipher_methods(true),
@@ -893,10 +862,7 @@ class Crypt implements CryptInterface
     /**
      * Checks if a mode (string) is in the values to compare (modes array)
      *
-     * @param array  $modes
-     * @param string $mode
-     *
-     * @return bool
+     * @phpstan-param encryption_cipher_list $modes
      */
     private function checkIsMode(array modes, string mode) -> bool
     {
@@ -906,9 +872,6 @@ class Crypt implements CryptInterface
     /**
      * Returns the block size
      *
-     * @param string $mode
-     *
-     * @return int
      * @throws Exception
      */
     private function getBlockSize(string mode) -> int
@@ -925,9 +888,6 @@ class Crypt implements CryptInterface
     /**
      * Initialize available cipher algorithms.
      *
-     * @param string $cipher
-     *
-     * @return int
      * @throws Exception
      */
     private function getIvLength(string cipher) -> int
@@ -936,9 +896,7 @@ class Crypt implements CryptInterface
 
         let length = openssl_cipher_iv_length(cipher);
         if false === length {
-            throw new Exception(
-                "Cannot calculate the initialization vector (IV) length of the cipher"
-            );
+            throw new IvLengthCalculationFailed();
         }
 
         return length;
@@ -946,8 +904,6 @@ class Crypt implements CryptInterface
 
     /**
      * Returns the mode (last few characters of the cipher)
-     *
-     * @return string
      */
     private function getMode() -> string
     {
@@ -957,18 +913,5 @@ class Crypt implements CryptInterface
         return mb_strtolower(
             substr(this->cipher, position - strlen(this->cipher) + 1)
         );
-    }
-
-    /**
-     * @todo to be removed when we get traits
-     */
-    protected function phpFunctionExists(string name) -> bool
-    {
-        return function_exists(name);
-    }
-
-    protected function phpOpensslRandomPseudoBytes(int length)
-    {
-        return openssl_random_pseudo_bytes(length);
     }
 }

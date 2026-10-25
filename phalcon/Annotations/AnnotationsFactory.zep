@@ -11,18 +11,28 @@
 namespace Phalcon\Annotations;
 
 use Phalcon\Annotations\Adapter\AdapterInterface;
+use Phalcon\Annotations\Adapter\Apcu;
+use Phalcon\Annotations\Adapter\Memory;
+use Phalcon\Annotations\Adapter\Stream;
+use Phalcon\Contracts\Annotations\AnnotationsTypes;
 use Phalcon\Factory\AbstractFactory;
-use Phalcon\Support\Helper\Arr\Get;
+use Phalcon\Traits\Support\Helper\Arr\GetTrait;
 
 /**
  * Factory to create annotations components
+ *
+ * @phpstan-import-type annotations_options from AnnotationsTypes
  */
 class AnnotationsFactory extends AbstractFactory
 {
+    use GetTrait;
+
     /**
      * AdapterFactory constructor.
+     *
+     * @phpstan-param array<string, class-string<AdapterInterface>> $services
      */
-    public function __construct(array! services = [])
+    public function __construct(array services = [])
     {
         this->init(services);
     }
@@ -38,6 +48,8 @@ class AnnotationsFactory extends AbstractFactory
      * ]
      *
      * Factory to create an instance from a Config object
+     *
+     * @phpstan-return AdapterInterface
      */
     public function load(var config) -> var
     {
@@ -49,7 +61,7 @@ class AnnotationsFactory extends AbstractFactory
 
         unset config["adapter"];
 
-        let options = (new Get())->__invoke(config, "options", []);
+        let options = this->getArrVal(config, "options", []);
 
         return this->newInstance(name, options);
     }
@@ -62,8 +74,10 @@ class AnnotationsFactory extends AbstractFactory
      *     'lifetime' => 3600,
      *     'annotationsDir' => 'phalconDir'
      * ]
+     *
+     * @phpstan-param annotations_options $options
      */
-    public function newInstance(string! name, array! options = []) -> <AdapterInterface>
+    public function newInstance(string name,  array options = []) -> <AdapterInterface>
     {
         var definition;
 
@@ -78,24 +92,24 @@ class AnnotationsFactory extends AbstractFactory
     }
 
     /**
-     * @return string
+     * @return class-string<\Exception>
      */
     protected function getExceptionClass() -> string
     {
-        return "Phalcon\\Annotations\\Exception";
+        return Exception::class;
     }
 
     /**
      * Returns the available adapters
      *
-     * @return string[]
+     * @return array<string, string>
      */
     protected function getServices() -> array
     {
         return [
-            "apcu"   : "Phalcon\\Annotations\\Adapter\\Apcu",
-            "memory" : "Phalcon\\Annotations\\Adapter\\Memory",
-            "stream" : "Phalcon\\Annotations\\Adapter\\Stream"
+            "apcu"   : Apcu::class,
+            "memory" : Memory::class,
+            "stream" : Stream::class
         ];
     }
 }

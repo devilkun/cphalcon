@@ -10,22 +10,10 @@
 
 namespace Phalcon\Forms\Element;
 
-use Phalcon\Tag;
-
 /**
- * Phalcon\Forms\Element\Radio
- *
  * Component INPUT[type=radio] for forms
  */
 class Radio extends AbstractElement
 {
-    /**
-     * Renders the element widget returning HTML
-     */
-    public function render(array attributes = []) -> string
-    {
-        return Tag::radioField(
-            this->prepareAttributes(attributes, true)
-        );
-    }
+    protected string method = "inputRadio";
 }

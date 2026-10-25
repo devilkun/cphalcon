@@ -13,19 +13,16 @@ namespace Phalcon\Mvc\Model;
 use Phalcon\Mvc\ModelInterface;
 
 /**
- * Phalcon\Mvc\Model\Behavior
- *
  * This is an optional base class for ORM behaviors
  */
 abstract class Behavior implements BehaviorInterface
 {
-    /**
-     * @var array
-     */
-    protected options;
+    protected array options;
 
     /**
      * Phalcon\Mvc\Model\Behavior
+     *
+     * @phpstan-param array<string, mixed> $options
      */
     public function __construct(array options = [])
     {
@@ -33,11 +30,33 @@ abstract class Behavior implements BehaviorInterface
     }
 
     /**
+     * Acts as fallbacks when a missing method is called on the model
+     *
+     * @phpstan-param array<array-key, mixed> $arguments
+     */
+    public function missingMethod(<ModelInterface> model, string method, array arguments = [])
+    {
+        return null;
+    }
+
+    /**
+     * This method receives the notifications from the EventsManager
+     *
+     * @phpstan-return mixed
+     */
+    public function notify(string type, <ModelInterface> model)
+    {
+        return null;
+    }
+
+    /**
      * Returns the behavior options related to an event
      *
      * @return array
+     *
+     * @phpstan-return array<string, mixed>|mixed
      */
-    protected function getOptions(string! eventName = null)
+    protected function getOptions(string eventName = null)
     {
         var options, eventOptions;
 
@@ -55,26 +74,10 @@ abstract class Behavior implements BehaviorInterface
     }
 
     /**
-     * Acts as fallbacks when a missing method is called on the model
-     */
-    public function missingMethod(<ModelInterface> model, string method, array arguments = [])
-    {
-        return null;
-    }
-
-    /**
      * Checks whether the behavior must take action on certain event
      */
-    protected function mustTakeAction(string! eventName) -> bool
+    protected function mustTakeAction(string eventName) -> bool
     {
         return isset this->options[eventName];
-    }
-
-    /**
-     * This method receives the notifications from the EventsManager
-     */
-    public function notify(string type, <ModelInterface> model)
-    {
-        return null;
     }
 }

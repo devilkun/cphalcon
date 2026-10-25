@@ -21,8 +21,6 @@
  * file that was distributed with this source code.
  */
 /**
- * Phalcon\Mvc\ViewInterface
- *
  * Interface for Phalcon\Mvc\View
  */
 ZEPHIR_INIT_CLASS(Phalcon_Mvc_ViewInterface)
@@ -59,6 +57,8 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_ViewInterface, finish);
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_ViewInterface, getActionName);
 /**
  * Returns the path of the view that is currently rendered
+ *
+ * @phpstan-return list<string>|string
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_ViewInterface, getActiveRenderPath);
 /**
@@ -95,10 +95,14 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_ViewInterface, isDisabled);
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_ViewInterface, pick);
 /**
  * Register templating engines
+ *
+ * @phpstan-param array<string, mixed> $engines
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_ViewInterface, registerEngines);
 /**
  * Executes render process from dispatching data
+ *
+ * @phpstan-param array<string, mixed> $params
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_ViewInterface, render);
 /**

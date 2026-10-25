@@ -11,21 +11,27 @@
 namespace Phalcon\Logger;
 
 use DateTimeZone;
+use Exception as BaseException;
 use Phalcon\Config\ConfigInterface;
+use Phalcon\Contracts\Logger\LoggerTypes;
 use Phalcon\Factory\AbstractConfigFactory;
+use Phalcon\Traits\Support\Helper\Arr\GetTrait;
 
 /**
  * Factory creating logger objects
+ *
+ * @phpstan-import-type logger_adapter_config from LoggerTypes
+ * @phpstan-import-type logger_adapters from LoggerTypes
+ * @phpstan-import-type logger_factory_config from LoggerTypes
  */
 class LoggerFactory extends AbstractConfigFactory
 {
-    /**
-     * @var AdapterFactory
-     */
-    private adapterFactory;
+    use GetTrait;
+
+    private <AdapterFactory> adapterFactory;
 
     /**
-     * @param AdapterFactory $factory
+     * Constructor
      */
     public function __construct(<AdapterFactory> factory)
     {
@@ -35,27 +41,34 @@ class LoggerFactory extends AbstractConfigFactory
     /**
      * Factory to create an instance from a Config object
      *
+     * The adapter list lives under `options`, not at the top level.
+     *
+     * @phpstan-param ConfigInterface|logger_factory_config $config
+     *
      * @param array|ConfigInterface $config = [
-     *     'name'     => 'messages',
-     *     'adapters' => [
-     *         'adapter' => 'stream',
-     *         'name'    => 'file.log',
-     *         'options' => [
-     *             'mode'     => 'ab',
-     *             'option'   => null,
-     *             'facility' => null
-     *         ]
+     *     'name'    => 'messages',
+     *     'options' => [
+     *         'adapters' => [
+     *             'adapter-name' => [
+     *                 'adapter' => 'stream',
+     *                 'name'    => 'file.log',
+     *                 'options' => [
+     *                     'mode'     => 'ab',
+     *                     'option'   => null,
+     *                     'facility' => null
+     *                 ],
+     *             ],
+     *         ],
      *     ]
      * ]
      */
     public function load(var config) -> <Logger>
     {
-        var adapter, adapterClass, adapterFileName, adapterOptions,
+        var adapter, adapterClass, adapterFileName, adapterName, adapterOptions,
             adapters, name, timezone, options;
-        array data;
+        array data = [];
 
-        let data     = [],
-            config   = this->checkConfig(config),
+        let config   = this->checkConfig(config),
             config   = this->checkConfigElement(config, "name"),
             name     = config["name"],
             timezone = this->getArrVal(config, "timezone"),
@@ -64,12 +77,12 @@ class LoggerFactory extends AbstractConfigFactory
 
 
 
-        for adapter in adapters {
+        for adapterName, adapter in adapters {
             let adapterClass    = this->getArrVal(adapter, "adapter"),
                 adapterFileName = this->getArrVal(adapter, "name"),
                 adapterOptions  = this->getArrVal(adapter, "options", []);
 
-            let data[] = this->adapterFactory->newInstance(
+            let data[adapterName] = this->adapterFactory->newInstance(
                 adapterClass,
                 adapterFileName,
                 adapterOptions
@@ -82,11 +95,7 @@ class LoggerFactory extends AbstractConfigFactory
     /**
      * Returns a Logger object
      *
-     * @param string            $name
-     * @param array             $adapters
-     * @param DateTimeZone|null $timezone
-     *
-     * @return Logger
+     * @phpstan-param logger_adapters $adapters
      */
     public function newInstance(
         string name,
@@ -97,27 +106,10 @@ class LoggerFactory extends AbstractConfigFactory
     }
 
     /**
-     * @todo Remove this when we get traits
-     */
-    protected function getArrVal(
-        array! collection,
-        var index,
-        var defaultValue = null
-    ) -> var {
-        var value;
-
-        if unlikely !fetch value, collection[index] {
-            return defaultValue;
-        }
-
-        return value;
-    }
-
-    /**
-     * @return string
+     * @return class-string<\Exception>
      */
     protected function getExceptionClass() -> string
     {
-        return "Phalcon\\Logger\\Exception";
+        return Exception::class;
     }
 }

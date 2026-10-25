@@ -1,0 +1,373 @@
+
+/**
+ * This file is part of the Phalcon Framework.
+ *
+ * (c) Phalcon Team <team@phalcon.io>
+ *
+ * For the full copyright and license information, please view the LICENSE.txt
+ * file that was distributed with this source code.
+ */
+
+namespace Phalcon\Filter\Validation\Validator;
+
+use Phalcon\Contracts\Filter\FilterTypes;
+use Phalcon\Filter\Validation;
+use Phalcon\Filter\Validation\AbstractCombinedFieldsValidator;
+use Phalcon\Filter\Validation\Exception;
+use Phalcon\Filter\Validation\Exceptions\UniquenessConversionMustBeArray;
+use Phalcon\Filter\Validation\Exceptions\UniquenessModelRequired;
+use Phalcon\Filter\Validation\Exceptions\UniquenessOnlyForPhalconModel;
+use Phalcon\Messages\Message;
+use Phalcon\Mvc\Model;
+use Phalcon\Mvc\ModelInterface;
+use Phalcon\Support\Settings;
+
+/**
+ * Check that a field is unique in the related table
+ *
+ * ```php
+ * use Phalcon\Filter\Validation;
+ * use Phalcon\Filter\Validation\Validator\Uniqueness as UniquenessValidator;
+ *
+ * $validator = new Validation();
+ *
+ * $validator->add(
+ *     "username",
+ *     new UniquenessValidator(
+ *         [
+ *             "model"   => new Users(),
+ *             "message" => ":field must be unique",
+ *         ]
+ *     )
+ * );
+ * ```
+ *
+ * Different attribute from the field:
+ * ```php
+ * $validator->add(
+ *     "username",
+ *     new UniquenessValidator(
+ *         [
+ *             "model"     => new Users(),
+ *             "attribute" => "nick",
+ *         ]
+ *     )
+ * );
+ * ```
+ *
+ * In model:
+ * ```php
+ * $validator->add(
+ *     "username",
+ *     new UniquenessValidator()
+ * );
+ * ```
+ *
+ * Combination of fields in model:
+ * ```php
+ * $validator->add(
+ *     [
+ *         "firstName",
+ *         "lastName",
+ *     ],
+ *     new UniquenessValidator()
+ * );
+ * ```
+ *
+ * It is possible to convert values before validation. This is useful in
+ * situations where values need to be converted to do the database lookup:
+ *
+ * ```php
+ * $validator->add(
+ *     "username",
+ *     new UniquenessValidator(
+ *         [
+ *             "convert" => function (array $values) {
+ *                 $values["username"] = strtolower($values["username"]);
+ *
+ *                 return $values;
+ *             }
+ *         ]
+ *     )
+ * );
+ * ```
+ *
+ * @phpstan-import-type filter_uniqueness_column_map from FilterTypes
+ * @phpstan-import-type filter_uniqueness_fields from FilterTypes
+ * @phpstan-import-type filter_uniqueness_params from FilterTypes
+ * @phpstan-import-type filter_uniqueness_values from FilterTypes
+ * @phpstan-import-type filter_validator_options from FilterTypes
+ */
+class Uniqueness extends AbstractCombinedFieldsValidator
+{
+    /**
+     * @var string|null
+     */
+    protected template = "Field :field must be unique";
+
+    /**
+     * @phpstan-var filter_uniqueness_column_map|null
+     */
+    private columnMap = null;
+
+    /**
+     * Constructor
+     *
+     * @phpstan-param filter_validator_options $options
+     */
+    public function __construct(array options = [])
+    {
+        parent::__construct(options);
+    }
+
+    /**
+     * Returns an option in the validator's options
+     * Returns null if the option hasn't set
+     *
+     * The `attribute` option can be defined as an array when validating a
+     * combination of fields; in that case resolve it to the mapped value.
+     *
+     * @param string     $key
+     * @param mixed|null $defaultValue
+     *
+     * @return mixed
+     */
+    public function getOption(string key, var defaultValue = null) -> var
+    {
+        var fieldValue, value;
+
+        if !this->hasOption(key) {
+            return defaultValue;
+        }
+
+        let value = parent::getOption(key, defaultValue);
+
+        if key === "attribute" && typeof value === "array" {
+            if fetch fieldValue, value[key] {
+                return fieldValue;
+            }
+        }
+
+        return value;
+    }
+
+    /**
+     * Executes the validation
+     */
+    public function validate(<Validation> validation, var field) -> bool
+    {
+        if !this->isUniqueness(validation, field) {
+            validation->appendMessage(
+                this->messageFactory(validation, field)
+            );
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * The column map is used in the case to get real column name
+     */
+    protected function getColumnNameReal(var record,  string field) -> string
+    {
+        // Caching columnMap
+        if Settings::get("orm.column_renaming") && !this->columnMap {
+            let this->columnMap = record->getDI()
+                ->getShared("modelsMetadata")
+                ->getColumnMap(record);
+        }
+
+        if typeof this->columnMap == "array" && isset this->columnMap[field] {
+            return this->columnMap[field];
+        }
+
+        return field;
+    }
+
+    protected function isUniqueness(<Validation> validation, var field) -> bool
+    {
+        var className, convert, isModel, record, singleField, values,
+            params = [];
+
+        if typeof field != "array" {
+            let singleField = field,
+                field = [];
+
+            let field[] = singleField;
+        }
+
+        let values = [],
+            convert = this->getOption("convert");
+
+        for singleField in field {
+            let values[singleField] = validation->getValue(singleField);
+        }
+
+        if convert != null {
+            let values = {convert}(values);
+
+            if unlikely !is_array(values) {
+                throw new UniquenessConversionMustBeArray();
+            }
+        }
+
+        let record = this->getOption("model");
+
+        if empty record || typeof record != "object" {
+            // check validation getEntity() method
+            let record = validation->getEntity();
+
+            if unlikely empty record {
+                throw new UniquenessModelRequired();
+            }
+        }
+
+        let isModel = record instanceof ModelInterface;
+
+        if isModel {
+            let params = this->isUniquenessModel(record, field, values);
+        } else {
+            throw new UniquenessOnlyForPhalconModel();
+        }
+
+        let className = get_class(record);
+
+        return {className}::count(params) == 0;
+    }
+
+    /**
+     * Uniqueness method used for model
+     *
+     * @phpstan-param filter_uniqueness_fields $field
+     * @phpstan-param filter_uniqueness_values $values
+     *
+     * @phpstan-return filter_uniqueness_params
+     */
+    protected function isUniquenessModel(var record, array field, array values)
+    {
+        var index, params, attribute, metaData, primaryField, singleField,
+            fieldExcept, singleExcept, notInValues, exceptConditions, value,
+            except;
+
+        let exceptConditions = [],
+            index  = 0,
+            params = [
+                "conditions": [],
+                "bind":       []
+            ],
+            except = this->getOption("except");
+
+        for singleField in field {
+            let fieldExcept = null,
+                notInValues = [],
+                value = values[singleField];
+
+            let attribute = this->getOption("attribute", singleField);
+            let attribute = this->getColumnNameReal(record, attribute);
+
+            if value != null {
+                let params["conditions"][] = attribute . " = ?" . index;
+                let params["bind"][] = value;
+                let index++;
+            } else {
+                let params["conditions"][] = attribute . " IS NULL";
+            }
+
+            if except {
+                if typeof except == "array" && array_keys(except) !== range(0, count(except) - 1) {
+                    for singleField, fieldExcept in except {
+                        let notInValues = [];
+                        let attribute = this->getColumnNameReal(
+                            record,
+                            this->getOption("attribute", singleField)
+                        );
+
+                        if typeof fieldExcept == "array" {
+                            for singleExcept in fieldExcept {
+                                let notInValues[] = "?" . index;
+                                let params["bind"][] = singleExcept;
+                                let index++;
+                            }
+
+                            let exceptConditions[] = attribute . " NOT IN (" . join(",", notInValues) . ")";
+                        } else {
+                            let exceptConditions[] = attribute . " <> ?" . index;
+                            let params["bind"][] = fieldExcept;
+                            let index++;
+                        }
+                    }
+                } elseif count(field) == 1 {
+                    let attribute = this->getColumnNameReal(
+                        record,
+                        this->getOption("attribute", field[0])
+                    );
+
+                    if typeof except == "array" {
+                        for singleExcept in except {
+                            let notInValues[] = "?" . index;
+                            let params["bind"][] = singleExcept;
+                            let index++;
+                        }
+
+                        let exceptConditions[] = attribute . " NOT IN (" . join(",", notInValues) . ")";
+                    } else {
+                        let params["conditions"][] = attribute . " <> ?" . index;
+                        let params["bind"][] = except;
+                        let index++;
+                    }
+                } elseif count(field) > 1 {
+                    for singleField in field {
+                        let attribute = this->getColumnNameReal(
+                            record,
+                            this->getOption("attribute", singleField)
+                        );
+
+                        if typeof except == "array" {
+                            for singleExcept in except {
+                                let notInValues[] = "?" . index;
+                                let params["bind"][] = singleExcept;
+                                let index++;
+                            }
+
+                            let exceptConditions[] = attribute . " NOT IN (" . join(",", notInValues) . ")";
+                        } else {
+                            let params["conditions"][] = attribute . " <> ?" . index;
+                            let params["bind"][] = except;
+                            let index++;
+                        }
+                    }
+                }
+            }
+        }
+
+        /**
+         * If the operation is update, there must be values in the object
+         */
+        if record->getDirtyState() == Model::DIRTY_STATE_PERSISTENT {
+            let metaData = record->getDI()->getShared("modelsMetadata");
+
+            for primaryField in metaData->getPrimaryKeyAttributes(record) {
+                let params["conditions"][] = this->getColumnNameReal(record, primaryField) . " <> ?" . index;
+
+                let params["bind"][] = record->readAttribute(
+                    this->getColumnNameReal(record, primaryField)
+                );
+
+                let index++;
+            }
+        }
+
+        if !empty exceptConditions {
+            let params["conditions"][] = "(" . join(" OR ", exceptConditions) . ")";
+        }
+
+        let params["conditions"] = join(
+            " AND ",
+            params["conditions"]
+        );
+
+        return params;
+    }
+}

@@ -13,9 +13,12 @@ namespace Phalcon\Annotations\Adapter;
 use Phalcon\Annotations\Reflection;
 use Phalcon\Annotations\Collection;
 use Phalcon\Annotations\ReaderInterface;
+use Phalcon\Contracts\Annotations\AnnotationsTypes;
 
 /**
  * This interface must be implemented by adapters in Phalcon\Annotations
+ *
+ * @phpstan-import-type annotations_collection_map from AnnotationsTypes
  */
 interface AdapterInterface
 {
@@ -25,14 +28,16 @@ interface AdapterInterface
     public function get(string className) -> <Reflection>;
 
     /**
-     * Returns the annotations found in a specific method
+     * Returns the annotations found in a specific constant
      */
-    public function getMethod(string className, string methodName) -> <Collection>;
+    public function getConstant(string className, string constantName) -> <Collection>;
 
     /**
-     * Returns the annotations found in all the class' methods
+     * Returns the annotations found in all the class' constants
+     *
+     * @phpstan-return annotations_collection_map
      */
-    public function getMethods(string className) -> array;
+    public function getConstants(string className) -> array;
 
     /**
      * Returns the annotations found in a specific property
@@ -41,8 +46,22 @@ interface AdapterInterface
 
     /**
      * Returns the annotations found in all the class' methods
+     *
+     * @phpstan-return annotations_collection_map
      */
     public function getProperties(string className) -> array;
+
+    /**
+     * Returns the annotations found in a specific method
+     */
+    public function getMethod(string className, string methodName) -> <Collection>;
+
+    /**
+     * Returns the annotations found in all the class' methods
+     *
+     * @phpstan-return annotations_collection_map
+     */
+    public function getMethods(string className) -> array;
 
     /**
      * Returns the annotation reader

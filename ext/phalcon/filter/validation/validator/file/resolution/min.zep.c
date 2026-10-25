@@ -1,0 +1,234 @@
+
+#ifdef HAVE_CONFIG_H
+#include "../../../../../../ext_config.h"
+#endif
+
+#include <php.h>
+#include "../../../../../../php_ext.h"
+#include "../../../../../../ext.h"
+
+#include <Zend/zend_operators.h>
+#include <Zend/zend_exceptions.h>
+#include <Zend/zend_interfaces.h>
+
+#include "kernel/main.h"
+#include "kernel/fcall.h"
+#include "kernel/memory.h"
+#include "kernel/operators.h"
+#include "kernel/object.h"
+#include "kernel/array.h"
+#include "kernel/string.h"
+
+
+/**
+ * This file is part of the Phalcon Framework.
+ *
+ * (c) Phalcon Team <team@phalcon.io>
+ *
+ * For the full copyright and license information, please view the LICENSE.txt
+ * file that was distributed with this source code.
+ */
+/**
+ * Checks if a file has the right resolution
+ *
+ * ```php
+ * use Phalcon\Filter\Validation;
+ * use Phalcon\Filter\Validation\Validator\File\Resolution\Min;
+ *
+ * $validator = new Validation();
+ *
+ * $validator->add(
+ *     "file",
+ *     new Min(
+ *         [
+ *             "resolution" => "800x600",
+ *             "message"    => "Min resolution of :field is :resolution",
+ *             "included"   => true,
+ *         ]
+ *     )
+ * );
+ *
+ * $validator->add(
+ *     [
+ *         "file",
+ *         "anotherFile",
+ *     ],
+ *     new Min(
+ *         [
+ *             "resolution" => [
+ *                 "file"        => "800x600",
+ *                 "anotherFile" => "1024x768",
+ *             ],
+ *             "included" => [
+ *                 "file"        => false,
+ *                 "anotherFile" => true,
+ *             ],
+ *             "message" => [
+ *                 "file"        => "Min resolution of file is 800x600",
+ *                 "anotherFile" => "Min resolution of file is 1024x768",
+ *             ],
+ *         ]
+ *     )
+ * );
+ * ```
+ *
+ * @phpstan-import-type filter_validator_options from FilterTypes
+ * @phpstan-import-type filter_uploaded_file from FilterTypes
+ */
+ZEPHIR_INIT_CLASS(Phalcon_Filter_Validation_Validator_File_Resolution_Min)
+{
+	ZEPHIR_REGISTER_CLASS_EX(Phalcon\\Filter\\Validation\\Validator\\File\\Resolution, Min, phalcon, filter_validation_validator_file_resolution_min, phalcon_filter_validation_validator_file_abstractfile_ce, phalcon_filter_validation_validator_file_resolution_min_method_entry, 0);
+
+	/**
+	 * @var string|null
+	 */
+	zend_declare_property_string(phalcon_filter_validation_validator_file_resolution_min_ce, SL("template"), "File :field can not have the minimum resolution of :resolution", ZEND_ACC_PROTECTED);
+	return SUCCESS;
+}
+
+/**
+ * Constructor
+ *
+ * @phpstan-param filter_validator_options $options
+ */
+PHP_METHOD(Phalcon_Filter_Validation_Validator_File_Resolution_Min, __construct)
+{
+	zephir_method_globals *ZEPHIR_METHOD_GLOBALS_PTR = NULL;
+	zend_long ZEPHIR_LAST_CALL_STATUS;
+	zval *options_param = NULL;
+	zval options;
+
+	ZVAL_UNDEF(&options);
+	ZEND_PARSE_PARAMETERS_START(0, 1)
+		Z_PARAM_OPTIONAL
+		ZEPHIR_Z_PARAM_ARRAY(options, options_param)
+	ZEND_PARSE_PARAMETERS_END();
+	ZEPHIR_METHOD_GLOBALS_PTR = pecalloc(1, sizeof(zephir_method_globals), 0);
+	zephir_memory_grow_stack(ZEPHIR_METHOD_GLOBALS_PTR, __func__);
+	zephir_fetch_params(1, 0, 1, &options_param);
+	if (!options_param) {
+		ZEPHIR_INIT_VAR(&options);
+		array_init(&options);
+	} else {
+		zephir_get_arrval(&options, options_param);
+	}
+	ZEPHIR_CALL_PARENT(NULL, phalcon_filter_validation_validator_file_resolution_min_ce, getThis(), "__construct", NULL, 0, &options);
+	zephir_check_call_status();
+	ZEPHIR_MM_RESTORE();
+}
+
+/**
+ * Executes the validation
+ */
+PHP_METHOD(Phalcon_Filter_Validation_Validator_File_Resolution_Min, validate)
+{
+	double _5$$6, _6$$7;
+	zend_bool result = 0, _7$$8, _8$$9;
+	zephir_method_globals *ZEPHIR_METHOD_GLOBALS_PTR = NULL;
+	zend_long ZEPHIR_LAST_CALL_STATUS;
+	zval *validation, validation_sub, *field, field_sub, height, minHeight, minWidth, resolution, resolutionArray, tmp, value, width, replacePairs, included, _0, _1, _2, _3$$5, _4$$6, _9$$10;
+	zval *this_ptr = getThis();
+
+	ZVAL_UNDEF(&validation_sub);
+	ZVAL_UNDEF(&field_sub);
+	ZVAL_UNDEF(&height);
+	ZVAL_UNDEF(&minHeight);
+	ZVAL_UNDEF(&minWidth);
+	ZVAL_UNDEF(&resolution);
+	ZVAL_UNDEF(&resolutionArray);
+	ZVAL_UNDEF(&tmp);
+	ZVAL_UNDEF(&value);
+	ZVAL_UNDEF(&width);
+	ZVAL_UNDEF(&replacePairs);
+	ZVAL_UNDEF(&included);
+	ZVAL_UNDEF(&_0);
+	ZVAL_UNDEF(&_1);
+	ZVAL_UNDEF(&_2);
+	ZVAL_UNDEF(&_3$$5);
+	ZVAL_UNDEF(&_4$$6);
+	ZVAL_UNDEF(&_9$$10);
+	ZEND_PARSE_PARAMETERS_START(2, 2)
+		Z_PARAM_OBJECT_OF_CLASS(validation, phalcon_filter_validation_ce)
+		Z_PARAM_ZVAL(field)
+	ZEND_PARSE_PARAMETERS_END();
+	ZEPHIR_METHOD_GLOBALS_PTR = pecalloc(1, sizeof(zephir_method_globals), 0);
+	zephir_memory_grow_stack(ZEPHIR_METHOD_GLOBALS_PTR, __func__);
+	zephir_fetch_params(1, 2, 0, &validation, &field);
+	ZEPHIR_INIT_VAR(&included);
+	ZVAL_BOOL(&included, 0);
+	ZEPHIR_CALL_METHOD(&_0, this_ptr, "checkUpload", NULL, 0, validation, field);
+	zephir_check_call_status();
+	if (ZEPHIR_IS_FALSE_IDENTICAL(&_0)) {
+		RETURN_MM_BOOL(0);
+	}
+	ZEPHIR_CALL_METHOD(&value, validation, "getValue", NULL, 0, field);
+	zephir_check_call_status();
+	zephir_memory_observe(&_1);
+	zephir_array_fetch_string(&_1, &value, SL("tmp_name"), PH_NOISY, "phalcon/Filter/Validation/Validator/File/Resolution/Min.zep", 96);
+	ZEPHIR_CALL_FUNCTION(&tmp, "getimagesize", NULL, 0, &_1);
+	zephir_check_call_status();
+	if (ZEPHIR_IS_FALSE_IDENTICAL(&tmp)) {
+		ZEPHIR_CALL_METHOD(NULL, this_ptr, "appendMessageValid", NULL, 0, validation, field);
+		zephir_check_call_status();
+		RETURN_MM_BOOL(0);
+	}
+	zephir_memory_observe(&width);
+	zephir_array_fetch_long(&width, &tmp, 0, PH_NOISY, "phalcon/Filter/Validation/Validator/File/Resolution/Min.zep", 105);
+	zephir_memory_observe(&height);
+	zephir_array_fetch_long(&height, &tmp, 1, PH_NOISY, "phalcon/Filter/Validation/Validator/File/Resolution/Min.zep", 106);
+	ZEPHIR_INIT_VAR(&_2);
+	ZVAL_STRING(&_2, "resolution");
+	ZEPHIR_CALL_METHOD(&resolution, this_ptr, "getOption", NULL, 0, &_2);
+	zephir_check_call_status();
+	if (Z_TYPE_P(&resolution) == IS_ARRAY) {
+		zephir_memory_observe(&_3$$5);
+		zephir_array_fetch(&_3$$5, &resolution, field, PH_NOISY, "phalcon/Filter/Validation/Validator/File/Resolution/Min.zep", 111);
+		ZEPHIR_CPY_WRT(&resolution, &_3$$5);
+	}
+	ZEPHIR_INIT_VAR(&resolutionArray);
+	zephir_fast_explode_str(&resolutionArray, SL("x"), &resolution, ZEND_LONG_MAX);
+	zephir_memory_observe(&minWidth);
+	zephir_array_fetch_long(&minWidth, &resolutionArray, 0, PH_NOISY, "phalcon/Filter/Validation/Validator/File/Resolution/Min.zep", 115);
+	zephir_memory_observe(&minHeight);
+	zephir_array_fetch_long(&minHeight, &resolutionArray, 1, PH_NOISY, "phalcon/Filter/Validation/Validator/File/Resolution/Min.zep", 116);
+	ZEPHIR_INIT_NVAR(&_2);
+	ZVAL_STRING(&_2, "included");
+	ZEPHIR_CALL_METHOD(&included, this_ptr, "getOption", NULL, 0, &_2);
+	zephir_check_call_status();
+	if (Z_TYPE_P(&included) == IS_ARRAY) {
+		zephir_memory_observe(&_4$$6);
+		zephir_array_fetch(&_4$$6, &included, field, PH_NOISY, "phalcon/Filter/Validation/Validator/File/Resolution/Min.zep", 121);
+		_5$$6 = zephir_get_boolval(&_4$$6);
+		ZEPHIR_INIT_NVAR(&included);
+		ZVAL_BOOL(&included, _5$$6);
+	} else {
+		_6$$7 = zephir_get_boolval(&included);
+		ZEPHIR_INIT_NVAR(&included);
+		ZVAL_BOOL(&included, _6$$7);
+	}
+	if (zephir_is_true(&included)) {
+		_7$$8 = ZEPHIR_LE(&width, &minWidth);
+		if (!(_7$$8)) {
+			_7$$8 = ZEPHIR_LE(&height, &minHeight);
+		}
+		result = _7$$8;
+	} else {
+		_8$$9 = ZEPHIR_LT(&width, &minWidth);
+		if (!(_8$$9)) {
+			_8$$9 = ZEPHIR_LT(&height, &minHeight);
+		}
+		result = _8$$9;
+	}
+	if (result) {
+		ZEPHIR_INIT_VAR(&replacePairs);
+		zephir_create_array(&replacePairs, 1, 0);
+		zephir_array_update_string(&replacePairs, SL(":resolution"), &resolution, PH_COPY | PH_SEPARATE);
+		ZEPHIR_CALL_METHOD(&_9$$10, this_ptr, "messageFactory", NULL, 0, validation, field, &replacePairs);
+		zephir_check_call_status();
+		ZEPHIR_CALL_METHOD(NULL, validation, "appendMessage", NULL, 0, &_9$$10);
+		zephir_check_call_status();
+		RETURN_MM_BOOL(0);
+	}
+	RETURN_MM_BOOL(1);
+}
+

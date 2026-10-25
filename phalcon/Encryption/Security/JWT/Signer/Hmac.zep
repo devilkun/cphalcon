@@ -11,20 +11,22 @@
 namespace Phalcon\Encryption\Security\JWT\Signer;
 
 use Phalcon\Encryption\Security\JWT\Exceptions\UnsupportedAlgorithmException;
+use Phalcon\Encryption\Security\JWT\Exceptions\UnsupportedHmacAlgorithm;
+use Phalcon\Traits\Php\HashTrait;
 
 /**
- * Class Hmac
+ * HMAC signing class
  */
 class Hmac extends AbstractSigner
 {
+    use HashTrait;
+
     /**
      * Hmac constructor.
      *
-     * @param string $algo
-     *
      * @throws UnsupportedAlgorithmException
      */
-    public function __construct(string! algo = "sha512")
+    public function __construct(string algo = "sha512")
     {
         array supported;
 
@@ -35,18 +37,14 @@ class Hmac extends AbstractSigner
         ];
 
         if !isset supported[algo] {
-            throw new UnsupportedAlgorithmException(
-                "Unsupported HMAC algorithm"
-            );
-        };
+            throw new UnsupportedHmacAlgorithm();
+        }
 
         let this->algorithm = algo;
     }
 
     /**
      * Return the value that is used for the "alg" header
-     *
-     * @return string
      */
     public function getAlgHeader() -> string
     {
@@ -55,41 +53,28 @@ class Hmac extends AbstractSigner
 
     /**
      * Sign a payload using the passphrase
-     *
-     * @param string $payload
-     * @param string $passphrase
-     *
-     * @return string
      */
-    public function sign(string! payload, string! passphrase) -> string
+    public function sign(string payload,  string passphrase) -> string
     {
         return this->getHash(payload, passphrase);
     }
 
     /**
      * Verify a passed source with a payload and passphrase
-     *
-     * @param string $source
-     * @param string $payload
-     * @param string $passphrase
-     *
-     * @return bool
      */
-    public function verify(string! source, string! payload, string! passphrase) -> bool
-    {
-        return hash_equals(source, this->getHash(payload, passphrase));
+    public function verify(
+        string source,
+        string payload,
+        string passphrase
+    ) -> bool {
+        return this->phpHashEquals(source, this->getHash(payload, passphrase));
     }
 
     /**
      * Calculates a hash from the passed parameters
-     *
-     * @param string $payload
-     * @param string $passphrase
-     *
-     * @return string
      */
-    private function getHash(string! payload, string! passphrase) -> string
+    private function getHash(string payload, string passphrase) -> string
     {
-        return hash_hmac(this->getAlgorithm(), payload, passphrase, true);
+        return this->phpHashHmac(this->getAlgorithm(), payload, passphrase, true);
     }
 }

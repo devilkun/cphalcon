@@ -10,12 +10,18 @@
 
 namespace Phalcon\Logger;
 
+use Exception as BaseException;
+use Phalcon\Contracts\Logger\LoggerTypes;
 use Phalcon\Factory\AbstractFactory;
 use Phalcon\Logger\Adapter\AdapterInterface;
-use Phalcon\Logger\Exception;
+use Phalcon\Logger\Adapter\Noop;
+use Phalcon\Logger\Adapter\Stream;
+use Phalcon\Logger\Adapter\Syslog;
 
 /**
  * Factory used to create adapters used for Logging
+ *
+ * @phpstan-import-type logger_adapter_options from LoggerTypes
  */
 class AdapterFactory extends AbstractFactory
 {
@@ -24,7 +30,7 @@ class AdapterFactory extends AbstractFactory
      *
      * @param array $services
      */
-    public function __construct(array! services = [])
+    public function __construct(array services = [])
     {
         this->init(services);
     }
@@ -32,16 +38,13 @@ class AdapterFactory extends AbstractFactory
     /**
      * Create a new instance of the adapter
      *
-     * @param string $name
-     * @param string $fileName
-     * @param array  $options
+     * @phpstan-param logger_adapter_options $options
      *
-     * @return AdapterInterface
-     * @throws Exception
+     * @throws BaseException
      */
     public function newInstance(
-        string! name,
-        string! fileName,
+         string name,
+         string fileName,
         array options = []
     ) -> <AdapterInterface>
     {
@@ -59,24 +62,24 @@ class AdapterFactory extends AbstractFactory
     }
 
     /**
-     * @return string
+     * @return class-string<\Exception>
      */
     protected function getExceptionClass() -> string
     {
-        return "Phalcon\\Logger\\Exception";
+        return Exception::class;
     }
 
     /**
      * Returns the available adapters
      *
-     * @return string[]
+     * @return array<string, string>
      */
     protected function getServices() -> array
     {
         return [
-            "noop"   : "Phalcon\\Logger\\Adapter\\Noop",
-            "stream" : "Phalcon\\Logger\\Adapter\\Stream",
-            "syslog" : "Phalcon\\Logger\\Adapter\\Syslog"
+            "noop"   : Noop::class,
+            "stream" : Stream::class,
+            "syslog" : Syslog::class
         ];
     }
 }

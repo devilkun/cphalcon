@@ -11,14 +11,12 @@
 namespace Phalcon\Encryption\Security\JWT\Signer;
 
 /**
- * Class None
+ * No signing class
  */
 class None implements SignerInterface
 {
     /**
      * Return the value that is used for the "alg" header
-     *
-     * @return string
      */
     public function getAlgHeader() -> string
     {
@@ -27,8 +25,6 @@ class None implements SignerInterface
 
     /**
      * Return the algorithm used
-     *
-     * @return string
      */
     public function getAlgorithm() -> string
     {
@@ -37,28 +33,20 @@ class None implements SignerInterface
 
     /**
      * Sign a payload using the passphrase
-     *
-     * @param string $payload
-     * @param string $passphrase
-     *
-     * @return string
      */
-    public function sign(string! payload, string passphrase) -> string
+    public function sign(string payload, string passphrase) -> string
     {
         return "";
     }
 
     /**
      * Verify a passed source with a payload and passphrase
-     *
-     * @param string $source
-     * @param string $payload
-     * @param string $passphrase
-     *
-     * @return bool
      */
-    public function verify(string! source, string! payload, string! passphrase) -> bool
-    {
+    public function verify(
+        string source,
+        string payload,
+        string passphrase
+    ) -> bool {
         return "" === source;
     }
 }

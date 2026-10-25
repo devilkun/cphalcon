@@ -1,0 +1,761 @@
+
+/**
+ * This file is part of the Phalcon Framework.
+ *
+ * (c) Phalcon Team <team@phalcon.io>
+ *
+ * For the full copyright and license information, please view the
+ * LICENSE.txt file that was distributed with this source code.
+ */
+
+namespace Phalcon\Di;
+
+use Phalcon\Config\Adapter\Php;
+use Phalcon\Config\Adapter\Yaml;
+use Phalcon\Config\ConfigInterface;
+use Phalcon\Contracts\Config\ConfigTypes;
+use Phalcon\Contracts\Di\DiTypes;
+use Phalcon\Di\DiInterface;
+use Phalcon\Di\Exception;
+use Phalcon\Di\Exception\ServiceResolutionException;
+use Phalcon\Di\Exceptions\AliasAlreadyInUse;
+use Phalcon\Di\Exceptions\AliasNameMustBeString;
+use Phalcon\Di\Exceptions\CircularAliasReference;
+use Phalcon\Di\Exceptions\ServiceCannotBeResolved;
+use Phalcon\Di\InitializationAwareInterface;
+use Phalcon\Di\InjectionAwareInterface;
+use Phalcon\Di\Service;
+use Phalcon\Di\ServiceInterface;
+use Phalcon\Di\ServiceProviderInterface;
+use Phalcon\Events\ManagerInterface;
+
+/**
+ * Phalcon\Di\Di is a component that implements Dependency Injection/Service
+ * Location of services, and it's itself a container for them.
+ *
+ * Since Phalcon is highly decoupled, Phalcon\Di\Di is essential to integrate the
+ * different components of the framework. The developer can also use this
+ * component to inject dependencies and manage global instances of the different
+ * classes used in the application.
+ *
+ * Basically, this component implements the `Inversion of Control` pattern.
+ * Applying this, the objects do not receive their dependencies using setters or
+ * constructors, but requesting a service dependency injector. This reduces the
+ * overall complexity, since there is only one way to get the required
+ * dependencies within a component.
+ *
+ * Additionally, this pattern increases testability in the code, thus making it
+ * less prone to errors.
+ *
+ *```php
+ * use Phalcon\Di\Di;
+ * use Phalcon\Http\Request;
+ *
+ * $di = new Di();
+ *
+ * // Using a string definition
+ * $di->set("request", Request::class, true);
+ *
+ * // Using an anonymous function
+ * $di->setShared(
+ *     "request",
+ *     function () {
+ *         return new Request();
+ *     }
+ * );
+ *
+ * $request = $di->getRequest();
+ *```
+ *
+ * @phpstan-import-type config_callbacks from ConfigTypes
+ * @phpstan-import-type di_parameters from DiTypes
+ */
+class Di implements DiInterface
+{
+    /**
+     * List of service aliases
+     *
+     * @var array<string, string>
+     */
+    protected array aliases = [];
+
+    /**
+     * Latest DI build
+     *
+     * @var DiInterface|null
+     */
+    protected static defaultContainer = null;
+
+    /**
+     * Events Manager
+     */
+    protected ?<ManagerInterface> eventsManager = null;
+
+    /**
+     * List of registered services
+     *
+     * @var ServiceInterface[]
+     */
+    protected array services = [];
+
+    /**
+     * List of shared instances
+     *
+     * @var array<string, mixed>
+     */
+    protected array sharedInstances = [];
+
+    /**
+     * Phalcon\Di\Di constructor
+     */
+    public function __construct()
+    {
+        if (null === self::defaultContainer) {
+            let self::defaultContainer = this;
+        }
+    }
+
+    /**
+     * Magic method to get or set services using setters/getters
+     *
+     * @param list<mixed> $arguments
+     */
+    public function __call(string method, array arguments = []) -> var | null
+    {
+        var instance, possibleService, definition;
+
+        /**
+         * If the magic method starts with "get" we try to get a service with
+         * that name
+         */
+        if starts_with(method, "get") {
+            let possibleService = lcfirst(substr(method, 3));
+
+            if isset this->services[possibleService] {
+                let instance = this->get(possibleService, arguments);
+
+                return instance;
+            }
+        }
+
+        /**
+         * If the magic method starts with "set" we try to set a service using
+         * that name
+         */
+        if starts_with(method, "set") {
+            if fetch definition, arguments[0] {
+                this->set(
+                    lcfirst(
+                        substr(method, 3)
+                    ),
+                    definition
+                );
+
+                return null;
+            }
+        }
+
+        throw Exception::undefinedMethod(method);
+    }
+
+    /**
+     * Return the latest DI created
+     */
+    public static function getDefault() -> <DiInterface> | null
+    {
+        return self::defaultContainer;
+    }
+
+    /**
+     * Resets the internal default DI
+     */
+    public static function reset() -> void
+    {
+        let self::defaultContainer = null;
+    }
+
+    /**
+     * Set a default dependency injection container to be obtained into static
+     * methods
+     */
+    public static function setDefault(<DiInterface> container) -> void
+    {
+        let self::defaultContainer = container;
+    }
+
+    /**
+     * Attempts to register a service in the services container
+     * Only is successful if a service hasn't been registered previously
+     * with the same name
+     */
+    public function attempt(string name, definition, bool shared = false) -> <ServiceInterface> | bool
+    {
+        if isset this->services[name] {
+            return false;
+        }
+
+        let this->services[name] = new Service(definition, shared);
+
+        return this->services[name];
+    }
+
+    /**
+     * Resolves the service based on its configuration
+     */
+    public function get(string name, parameters = null) -> var
+    {
+        var service  = null,
+            isShared = false,
+            instance = null;
+
+        /**
+         * Resolve the alias, if any. Call resolveAlias() only when the name
+         * has an alias.
+         */
+        if isset this->aliases[name] {
+            let name = this->resolveAlias(name);
+        }
+
+        /**
+         * If the service is shared and it already has a cached instance then
+         * immediately return it without triggering events.
+         */
+        if fetch service, this->services[name] {
+            let isShared = service->isShared();
+
+            if isShared && (fetch instance, this->sharedInstances[name]) && instance !== null {
+                return instance;
+            }
+        }
+
+        /**
+         * Allows for custom creation of instances through the
+         * "di:beforeServiceResolve" event.
+         */
+        if this->eventsManager !== null {
+            let instance = this->eventsManager->fire(
+                "di:beforeServiceResolve",
+                this,
+                [
+                    "name":       name,
+                    "parameters": parameters
+                ]
+            );
+        }
+
+        if instance === null {
+            if service !== null {
+                // The service is registered in the DI.
+                try {
+                    let instance = service->resolve(parameters, this);
+                } catch ServiceResolutionException {
+                    throw new ServiceCannotBeResolved(name);
+                }
+
+                // If the service is shared then we'll cache the instance.
+                if isShared {
+                    let this->sharedInstances[name] = instance;
+                }
+            } else {
+                /**
+                 * The DI also acts as builder for any class even if it isn't
+                 * defined in the DI
+                 */
+                if unlikely !class_exists(name) {
+                    throw Exception::serviceNotFound(name);
+                }
+
+                if typeof parameters == "array" && !empty parameters {
+                    let instance = create_instance_params(name, parameters);
+                } else {
+                    let instance = create_instance(name);
+                }
+            }
+        }
+
+        /**
+         * Pass the DI to the instance if it implements
+         * \Phalcon\Di\InjectionAwareInterface
+         */
+        if typeof instance === "object" {
+            if instance instanceof InjectionAwareInterface {
+                instance->setDI(this);
+            }
+
+            if instance instanceof InitializationAwareInterface {
+                instance->initialize();
+            }
+        }
+
+        /**
+         * Allows for post creation instance configuration through the
+         * "di:afterServiceResolve" event.
+         */
+        if this->eventsManager !== null {
+            this->eventsManager->fire(
+                "di:afterServiceResolve",
+                this,
+                [
+                    "name":       name,
+                    "parameters": parameters,
+                    "instance":   instance
+                ]
+            );
+        }
+
+        return instance;
+    }
+
+    /**
+     * Return the alias based on a passed key. Returns an empty string if
+     * the alias does not exist
+     */
+    public function getAlias(string name) -> string
+    {
+        return isset(this->aliases[name]) ? this->aliases[name] : "";
+    }
+
+    /**
+     * Returns the internal event manager
+     */
+    public function getInternalEventsManager() -> <ManagerInterface> | null
+    {
+        return this->eventsManager;
+    }
+
+    /**
+     * Returns a service definition without resolving
+     */
+    public function getRaw(string name) -> var
+    {
+        return this->getService(name)
+                   ->getDefinition()
+        ;
+    }
+
+    /**
+     * Returns a Phalcon\Di\Service instance
+     */
+    public function getService(string name) -> <ServiceInterface>
+    {
+        /**
+         * Resolve the alias, if any
+         */
+        let name = this->resolveAlias(name);
+
+        if (true !== this->has(name)) {
+            throw Exception::serviceNotFound(name);
+        }
+
+        return this->services[name];
+    }
+
+    /**
+     * Return the services registered in the DI
+     */
+    public function getServices() -> <ServiceInterface[]>
+    {
+        return this->services;
+    }
+
+    /**
+     * Resolves a service, the resolved service is stored in the DI, subsequent
+     * requests for this service will return the same instance
+     */
+    public function getShared(string name, parameters = null) -> var
+    {
+        var instance;
+
+        /**
+         * Resolve the alias, if any. Call resolveAlias() only when the name
+         * has an alias.
+         */
+        if isset this->aliases[name] {
+            let name = this->resolveAlias(name);
+        }
+
+        if (fetch instance, this->sharedInstances[name]) && instance !== null {
+            return instance;
+        }
+
+        // Store the instance in the shared instances cache.
+        let instance                    = this->get(name, parameters),
+            this->sharedInstances[name] = instance;
+
+        return instance;
+    }
+
+    /**
+     * Check whether the DI contains a service by a name
+     */
+    public function has(string name) -> bool
+    {
+        /**
+         * Resolve the alias, if any. Call resolveAlias() only when the name
+         * has an alias.
+         */
+        if isset this->aliases[name] {
+            let name = this->resolveAlias(name);
+        }
+
+        return isset(this->services[name]);
+    }
+
+    /**
+     * Check whether the DI has a cached shared instance for a service name.
+     *
+     * Unlike `has()`, which reports on the service *definition* registry,
+     * this method reports only on the resolved-instance cache populated by
+     * `getShared()`.
+     */
+    public function hasShared(string name) -> bool
+    {
+        /**
+         * Resolve the alias, if any
+         */
+        let name = this->resolveAlias(name);
+
+        return isset(this->sharedInstances[name]);
+    }
+
+    /**
+     * Loads services from a php config file.
+     *
+     * ```php
+     * $di->loadFromPhp("path/services.php");
+     * ```
+     *
+     * And the services can be specified in the file as:
+     *
+     * ```php
+     * return [
+     *      'myComponent' => [
+     *          'className' => '\Acme\Components\MyComponent',
+     *          'shared' => true,
+     *      ],
+     *      'group' => [
+     *          'className' => '\Acme\Group',
+     *          'arguments' => [
+     *              [
+     *                  'type' => 'service',
+     *                  'service' => 'myComponent',
+     *              ],
+     *          ],
+     *      ],
+     *      'user' => [
+     *          'className' => '\Acme\User',
+     *      ],
+     * ];
+     * ```
+     *
+     * @link https://docs.phalcon.io/latest/di/
+     */
+    public function loadFromPhp(string filePath) -> void
+    {
+        var services;
+
+        let services = new Php(filePath);
+
+        this->loadFromConfig(services);
+    }
+
+    /**
+     * Loads services from a yaml file.
+     *
+     * ```php
+     * $di->loadFromYaml(
+     *     "path/services.yaml",
+     *     [
+     *         "!approot" => function ($value) {
+     *             return dirname(__DIR__) . $value;
+     *         }
+     *     ]
+     * );
+     * ```
+     *
+     * And the services can be specified in the file as:
+     *
+     * ```php
+     * myComponent:
+     *     className: \Acme\Components\MyComponent
+     *     shared: true
+     *
+     * group:
+     *     className: \Acme\Group
+     *     arguments:
+     *         - type: service
+     *           name: myComponent
+     *
+     * user:
+     *    className: \Acme\User
+     * ```
+     *
+     * @phpstan-param config_callbacks|null $callbacks
+     *
+     * @link https://docs.phalcon.io/latest/di/
+     */
+    public function loadFromYaml(string filePath,  array callbacks = null) -> void
+    {
+        var services;
+
+        let services = new Yaml(filePath, callbacks);
+
+        this->loadFromConfig(services);
+    }
+
+    /**
+     * Check if a service is registered using the array syntax
+     */
+    public function offsetExists(mixed name) -> bool
+    {
+        return this->has(name);
+    }
+
+    /**
+     * Allows to obtain a shared service using the array syntax
+     *
+     *```php
+     * var_dump($di["request"]);
+     *```
+     */
+    public function offsetGet(mixed name) -> mixed
+    {
+        return this->getShared(name);
+    }
+
+    /**
+     * Allows to register a shared service using the array syntax
+     *
+     *```php
+     * $di["request"] = new \Phalcon\Http\Request();
+     *```
+     */
+    public function offsetSet(mixed offset, mixed value) -> void
+    {
+        this->setShared(offset, value);
+    }
+
+    /**
+     * Removes a service from the services container using the array syntax
+     */
+    public function offsetUnset(mixed name) -> void
+    {
+        this->remove(name);
+    }
+
+    /**
+     * Registers a service provider.
+     *
+     * ```php
+     * use Phalcon\Di\DiInterface;
+     * use Phalcon\Di\ServiceProviderInterface;
+     *
+     * class SomeServiceProvider implements ServiceProviderInterface
+     * {
+     *     public function register(DiInterface $di)
+     *     {
+     *         $di->setShared(
+     *             'service',
+     *             function () {
+     *                 // ...
+     *             }
+     *         );
+     *     }
+     * }
+     * ```
+     */
+    public function register(<ServiceProviderInterface> provider) -> void
+    {
+        provider->register(this);
+    }
+
+    /**
+     * Removes a service in the services container
+     * It also removes any shared instance created for the service
+     */
+    public function remove(string name) -> void
+    {
+        var alias, aliases, services, sharedInstances, target;
+
+        let aliases         = this->aliases;
+        let services        = this->services;
+        let sharedInstances = this->sharedInstances;
+
+        /**
+         * Resolve the alias, if any
+         */
+        let name = this->resolveAlias(name);
+
+        unset services[name];
+        unset sharedInstances[name];
+
+        /**
+         * Remove any alias that resolves, directly or through a chain, to
+         * the removed service
+         */
+        for alias, target in this->aliases {
+            if (name === this->resolveAlias(target)) {
+                unset aliases[alias];
+            }
+        }
+
+        let this->aliases         = aliases;
+        let this->services        = services;
+        let this->sharedInstances = sharedInstances;
+    }
+
+    /**
+     * Removes the cached shared instance for a service, leaving the service
+     * definition intact so the next `getShared()` call rebuilds it.
+     */
+    public function removeShared(string name) -> void
+    {
+        var sharedInstances, service;
+
+        let sharedInstances = this->sharedInstances;
+
+        /**
+         * Resolve the alias, if any
+         */
+        let name = this->resolveAlias(name);
+
+        unset sharedInstances[name];
+
+        let this->sharedInstances = sharedInstances;
+
+        /**
+         * `Service::resolve` caches the resolved instance on the Service
+         * itself for shared services; clear that too so the next
+         * `getShared()` call goes through full resolution.
+         */
+        if isset this->services[name] {
+            let service = this->services[name];
+            if service instanceof Service {
+                service->setSharedInstance(null);
+            }
+        }
+    }
+
+    /**
+     * Registers a service in the services container
+     */
+    public function set(string name, var definition, bool shared = false) -> <ServiceInterface>
+    {
+        /**
+         * Resolve the alias, if any. Call resolveAlias() only when the name
+         * has an alias.
+         */
+        if isset this->aliases[name] {
+            let name = this->resolveAlias(name);
+        }
+
+        let this->services[name] = new Service(definition, shared);
+
+        return this->services[name];
+    }
+
+    /**
+     * Sets one or more aliases to the given name.
+     *
+     * @param array<array-key, mixed>|string $aliases
+     *
+     * @return Di
+     * @throws Exception
+     */
+    public function setAlias(string name, var aliases) -> <self>
+    {
+        var alias, currentAliases, localAliases;
+
+        if (true !== this->has(name)) {
+            throw Exception::serviceNotFound(name);
+        }
+
+        let currentAliases = this->aliases;
+        let localAliases   = aliases;
+        if (typeof localAliases !== "array") {
+            let localAliases = [localAliases];
+        }
+
+        for alias in localAliases {
+            if (typeof alias !== "string") {
+                throw new AliasNameMustBeString();
+            }
+
+            if (true === isset(currentAliases[alias]) || true === this->has(alias)) {
+                throw new AliasAlreadyInUse(alias);
+            }
+
+            let currentAliases[alias] = name;
+        }
+
+        let this->aliases = currentAliases;
+
+        return this;
+    }
+
+    /**
+     * Sets the internal event manager
+     */
+    public function setInternalEventsManager(<ManagerInterface> eventsManager)
+    {
+        let this->eventsManager = eventsManager;
+    }
+
+    /**
+     * Sets a service using a raw Phalcon\Di\Service definition
+     */
+    public function setService(string name, <ServiceInterface> rawDefinition) -> <ServiceInterface>
+    {
+        let this->services[name] = rawDefinition;
+
+        return rawDefinition;
+    }
+
+    /**
+     * Registers an "always shared" service in the services container
+     */
+    public function setShared(string name, var definition) -> <ServiceInterface>
+    {
+        return this->set(name, definition, true);
+    }
+    /**
+     * Loads services from a Config object.
+     */
+    protected function loadFromConfig(<ConfigInterface> config) -> void
+    {
+        var services, name, service;
+
+        let services = config->toArray();
+
+        for name, service in services {
+            this->set(
+                name,
+                service,
+                typeof service === "array" && isset service["shared"] && service["shared"]
+            );
+        }
+    }
+
+    /**
+     * Resolve an alias to its actual service name
+     *
+     * @throws Exception
+     */
+    private function resolveAlias(string name) -> string
+    {
+        var current, seen;
+
+        let current = name;
+        let seen    = [];
+
+        while (isset(this->aliases[current])) {
+            if (isset(seen[current])) {
+                throw new CircularAliasReference(name);
+            }
+            let seen[current] = true;
+            let current       = this->aliases[current];
+        }
+
+        return current;
+    }
+}

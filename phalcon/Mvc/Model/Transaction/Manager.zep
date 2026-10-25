@@ -10,15 +10,14 @@
 
 namespace Phalcon\Mvc\Model\Transaction;
 
-use Phalcon\Di;
+use Phalcon\Di\Di;
 use Phalcon\Di\DiInterface;
 use Phalcon\Di\InjectionAwareInterface;
+use Phalcon\Mvc\Model\Exceptions\ManagerOrmServicesUnavailable;
 use Phalcon\Mvc\Model\Transaction;
 use Phalcon\Mvc\Model\TransactionInterface;
 
 /**
- * Phalcon\Mvc\Model\Transaction\Manager
- *
  * A transaction acts on a single database connection. If you have multiple
  * class-specific databases, the transaction will not protect interaction among
  * them.
@@ -36,25 +35,25 @@ use Phalcon\Mvc\Model\TransactionInterface;
  *
  *    $transaction = $transactionManager->get();
  *
- *    $robot = new Robots();
+ *    $invoice = new Invoices();
  *
- *    $robot->setTransaction($transaction);
+ *    $invoice->setTransaction($transaction);
  *
- *    $robot->name       = "WALL·E";
- *    $robot->created_at = date("Y-m-d");
+ *    $invoice->inv_title       = "Test Invoice";
+ *    $invoice->inv_created_at = date("Y-m-d");
  *
- *    if ($robot->save() === false) {
- *        $transaction->rollback("Can't save robot");
+ *    if ($invoice->save() === false) {
+ *        $transaction->rollback("Can't save invoice");
  *    }
  *
- *    $robotPart = new RobotParts();
+ *    $product = new Products();
  *
- *    $robotPart->setTransaction($transaction);
+ *    $product->setTransaction($transaction);
  *
- *    $robotPart->type = "head";
+ *    $product->prd_name = "Widget";
  *
- *    if ($robotPart->save() === false) {
- *        $transaction->rollback("Can't save robot part");
+ *    if ($product->save() === false) {
+ *        $transaction->rollback("Can't save product");
  *    }
  *
  *    $transaction->commit();
@@ -65,40 +64,20 @@ use Phalcon\Mvc\Model\TransactionInterface;
  */
 class Manager implements ManagerInterface, InjectionAwareInterface
 {
+    protected ?<DiInterface> container;
+    protected bool initialized = false;
+    protected int number = 0;
+    protected bool rollbackPendent = true;
+    protected string service = "db";
     /**
-     * @var DiInterface|null
+     * @phpstan-var list<TransactionInterface>
      */
-    protected container;
-
-    /**
-     * @var bool
-     */
-    protected initialized = false;
-
-    /**
-     * @var int
-     */
-    protected number = 0;
-
-    /**
-     * @var bool
-     */
-    protected rollbackPendent = true;
-
-    /**
-     * @var string
-     */
-    protected service = "db";
-
-    /**
-     * @var array
-     */
-    protected transactions = [];
+    protected array transactions = [];
 
     /**
      * Phalcon\Mvc\Model\Transaction\Manager constructor
      *
-     * @param DiInterface|null container
+     * @throws ManagerOrmServicesUnavailable
      */
     public function __construct(<DiInterface> container = null)
     {
@@ -109,11 +88,7 @@ class Manager implements ManagerInterface, InjectionAwareInterface
         let this->container = container;
 
         if unlikely typeof container != "object" {
-            throw new Exception(
-                Exception::containerServiceNotFound(
-                    "the services related to the ORM"
-                )
-            );
+            throw new ManagerOrmServicesUnavailable();
         }
     }
 
@@ -148,16 +123,14 @@ class Manager implements ManagerInterface, InjectionAwareInterface
             if connection->isUnderTransaction() {
                 connection->commit();
             }
+
+            this->collectTransaction(transaction);
         }
     }
 
     /**
      * Returns a new \Phalcon\Mvc\Model\Transaction or an already created once
      * This method registers a shutdown function to rollback active connections
-     *
-     * @param bool autoBegin
-     *
-     * @return TransactionInterface
      */
     public function get(bool autoBegin = true) -> <TransactionInterface>
     {
@@ -196,9 +169,7 @@ class Manager implements ManagerInterface, InjectionAwareInterface
     /**
      * Create/Returns a new transaction or an existing one
      *
-     * @param bool autoBegin
-     *
-     * @return TransactionInterface
+     * @throws ManagerOrmServicesUnavailable
      */
     public function getOrCreateTransaction(bool autoBegin = true) -> <TransactionInterface>
     {
@@ -207,11 +178,7 @@ class Manager implements ManagerInterface, InjectionAwareInterface
         let container = <DiInterface> this->container;
 
         if unlikely typeof container != "object" {
-            throw new Exception(
-                Exception::containerServiceNotFound(
-                    "the services related to the ORM"
-                )
-            );
+            throw new ManagerOrmServicesUnavailable();
         }
 
         if this->number {
@@ -253,8 +220,6 @@ class Manager implements ManagerInterface, InjectionAwareInterface
 
     /**
      * Notifies the manager about a committed transaction
-     *
-     * @param TransactionInterface transaction
      */
     public function notifyCommit(<TransactionInterface> transaction) -> void
     {
@@ -263,8 +228,6 @@ class Manager implements ManagerInterface, InjectionAwareInterface
 
     /**
      * Notifies the manager about a rollbacked transaction
-     *
-     * @param TransactionInterface transaction
      */
     public function notifyRollback(<TransactionInterface> transaction) -> void
     {
@@ -274,8 +237,6 @@ class Manager implements ManagerInterface, InjectionAwareInterface
     /**
      * Rollbacks active transactions within the manager
      * Collect will remove the transaction from the manager
-     *
-     * @param bool collect
      */
     public function rollback(bool collect = true) -> void
     {
@@ -307,10 +268,8 @@ class Manager implements ManagerInterface, InjectionAwareInterface
 
     /**
      * Sets the database service used to run the isolated transactions
-     *
-     * @param string service
      */
-    public function setDbService(string! service) -> <ManagerInterface>
+    public function setDbService(string service) -> <ManagerInterface>
     {
         let this->service = service;
 
@@ -319,8 +278,6 @@ class Manager implements ManagerInterface, InjectionAwareInterface
 
     /**
      * Sets the dependency injection container
-     *
-     * @param DiInterface container
      */
     public function setDI(<DiInterface> container) -> void
     {
@@ -330,8 +287,6 @@ class Manager implements ManagerInterface, InjectionAwareInterface
     /**
      * Set if the transaction manager must register a shutdown function to clean
      * up pendent transactions
-     *
-     * @param bool rollbackPendent
      */
     public function setRollbackPendent(bool rollbackPendent) -> <ManagerInterface>
     {
@@ -342,8 +297,6 @@ class Manager implements ManagerInterface, InjectionAwareInterface
 
     /**
      * Removes transactions from the TransactionManager
-     *
-     * @param TransactionInterface transaction
      */
     protected function collectTransaction(<TransactionInterface> transaction) -> void
     {
@@ -354,7 +307,7 @@ class Manager implements ManagerInterface, InjectionAwareInterface
 
         for managedTransaction in this->transactions {
             if managedTransaction != transaction {
-                let newTransactions[] = transaction;
+                let newTransactions[] = managedTransaction;
             } else {
                 let this->number--;
             }

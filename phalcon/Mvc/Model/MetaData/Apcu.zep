@@ -10,9 +10,9 @@
 
 namespace Phalcon\Mvc\Model\MetaData;
 
-use Phalcon\Mvc\Model\MetaData;
-use Phalcon\Mvc\Model\Exception;
 use Phalcon\Cache\AdapterFactory;
+use Phalcon\Contracts\Storage\StorageTypes;
+use Phalcon\Mvc\Model\MetaData;
 
 /**
  * Phalcon\Mvc\Model\MetaData\Apcu
@@ -31,15 +31,17 @@ use Phalcon\Cache\AdapterFactory;
  *     ]
  * );
  *```
+ *
+ * @phpstan-import-type storage_adapter_options from StorageTypes
  */
 class Apcu extends MetaData
 {
     /**
      * Phalcon\Mvc\Model\MetaData\Apcu constructor
      *
-     * @param array options
+     * @param array<string, mixed> $options
      */
-    public function __construct(<AdapterFactory> factory, array! options = null)
+    public function __construct(<AdapterFactory> factory,  array options = null)
     {
         let options["prefix"]   = this->getArrVal(options, "prefix", "ph-mm-apcu-"),
             options["lifetime"] = this->getArrVal(options, "lifetime", 172800),

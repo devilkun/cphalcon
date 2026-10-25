@@ -17,13 +17,17 @@
  *
  * (c) Phalcon Team <team@phalcon.io>
  *
- * For the full copyright and license information, please view the
- * LICENSE.txt file that was distributed with this source code.
+ * For the full copyright and license information, please view the LICENSE.txt
+ * file that was distributed with this source code.
  */
 /**
- * Phalcon\Mvc\Model\CriteriaInterface
- *
  * Interface for Phalcon\Mvc\Model\Criteria
+ *
+ * @phpstan-import-type mvc_model_bind_params from MvcTypes
+ * @phpstan-import-type mvc_model_bind_types from MvcTypes
+ * @phpstan-import-type mvc_model_cache_options from MvcTypes
+ * @phpstan-import-type mvc_model_parameters from MvcTypes
+ * @phpstan-import-type mvc_query_columns from MvcTypes
  */
 ZEPHIR_INIT_CLASS(Phalcon_Mvc_Model_CriteriaInterface)
 {
@@ -53,16 +57,22 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, betweenWhere);
 /**
  * Sets the bound parameters in the criteria
  * This method replaces all previously set bound parameters
+ *
+ * @phpstan-param mvc_model_bind_params $bindParams
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, bind);
 /**
  * Sets the bind types in the criteria
  * This method replaces all previously set bound parameters
+ *
+ * @phpstan-param mvc_model_bind_types $bindTypes
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, bindTypes);
 /**
  * Sets the cache options in the criteria
  * This method replaces all previously set cache options
+ *
+ * @phpstan-param mvc_model_cache_options $cache
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, cache);
 /**
@@ -83,6 +93,8 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, execute);
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, forUpdate);
 /**
  * Returns the columns to be queried
+ *
+ * @phpstan-return mvc_query_columns|null
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, getColumns);
 /**
@@ -103,6 +115,8 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, getHaving);
  * - An integer if 'limit' was set without an 'offset'
  * - An array with 'number' and 'offset' keys if an offset was set with the limit
  * - NULL if limit has not been set
+ *
+ * @phpstan-return array{number: int|string, offset?: int|string}|int|null
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, getLimit);
 /**
@@ -115,6 +129,8 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, getModelName);
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, getOrderBy);
 /**
  * Returns all the parameters defined in the criteria
+ *
+ * @phpstan-return mvc_model_parameters
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, getParams);
 /**
@@ -134,17 +150,17 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, having);
  *
  *```php
  * $criteria->innerJoin(
- *     Robots::class
+ *     Orders::class
  * );
  *
  * $criteria->innerJoin(
- *     Robots::class,
- *     "r.id = RobotsParts.robots_id"
+ *     Orders::class,
+ *     "r.ord_id = OrdersProducts.oxp_ord_id"
  * );
  *
  * $criteria->innerJoin(
- *     Robots::class,
- *     "r.id = RobotsParts.robots_id",
+ *     Orders::class,
+ *     "r.ord_id = OrdersProducts.oxp_ord_id",
  *     "r"
  * );
  *```
@@ -156,6 +172,8 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, innerJoin);
  *```php
  * $criteria->inWhere("id", [1, 2, 3]);
  *```
+ *
+ * @phpstan-param array<array-key, mixed> $values
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, inWhere);
 /**
@@ -163,8 +181,8 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, inWhere);
  *
  *```php
  * $criteria->leftJoin(
- *     Robots::class,
- *     "r.id = RobotsParts.robots_id",
+ *     Orders::class,
+ *     "r.ord_id = OrdersProducts.oxp_ord_id",
  *     "r"
  * );
  *```
@@ -191,6 +209,8 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, notBetweenWhere);
  *```php
  * $criteria->notInWhere("id", [1, 2, 3]);
  *```
+ *
+ * @phpstan-param array<array-key, mixed> $values
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, notInWhere);
 /**
@@ -209,8 +229,8 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_CriteriaInterface, orWhere);
  *
  *```php
  * $criteria->rightJoin(
- *     Robots::class,
- *     "r.id = RobotsParts.robots_id",
+ *     Orders::class,
+ *     "r.ord_id = OrdersProducts.oxp_ord_id",
  *     "r"
  * );
  *```

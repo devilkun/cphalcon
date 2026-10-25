@@ -22,6 +22,12 @@
  */
 /**
  * Interface for Phalcon\Mvc\Router
+ *
+ * @phpstan-import-type mvc_router_defaults from MvcTypes
+ * @phpstan-import-type mvc_router_http_methods from MvcTypes
+ * @phpstan-import-type mvc_router_matches from MvcTypes
+ * @phpstan-import-type mvc_router_params from MvcTypes
+ * @phpstan-import-type mvc_router_paths from MvcTypes
  */
 ZEPHIR_INIT_CLASS(Phalcon_Mvc_RouterInterface)
 {
@@ -41,15 +47,6 @@ ZEPHIR_INIT_CLASS(Phalcon_Mvc_RouterInterface)
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, add);
 /**
- * Attach Route object to the routes stack.
- *
- * @param RouteInterface route
- * @param int position
- *
- * @return RouterInterface
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, attach);
-/**
  * Adds a route to the router that only match if the HTTP method is CONNECT
  *
  * @param string pattern
@@ -68,15 +65,6 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, addConnect);
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, addDelete);
 /**
- * Adds a route to the router that only match if the HTTP method is HEAD
- *
- * @param string pattern
- * @param array|string|null paths
- *
- * @return RouteInterface
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, addHead);
-/**
  * Adds a route to the router that only match if the HTTP method is GET
  *
  * @param string pattern
@@ -85,6 +73,15 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, addHead);
  * @return RouteInterface
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, addGet);
+/**
+ * Adds a route to the router that only match if the HTTP method is HEAD
+ *
+ * @param string pattern
+ * @param array|string|null paths
+ *
+ * @return RouteInterface
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, addHead);
 /**
  * Add a route to the router that only match if the HTTP method is OPTIONS
  *
@@ -141,6 +138,15 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, addPut);
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, addTrace);
 /**
+ * Attach Route object to the routes stack.
+ *
+ * @param RouteInterface route
+ * @param int position
+ *
+ * @return RouterInterface
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, attach);
+/**
  * Removes all the defined routes
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, clear);
@@ -158,6 +164,8 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, getControllerName);
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, getMatchedRoute);
 /**
  * Return the sub expressions in the regular expression matched
+ *
+ * @phpstan-return mvc_router_matches
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, getMatches);
 /**
@@ -170,12 +178,10 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, getModuleName);
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, getNamespaceName);
 /**
  * Returns processed extra params
+ *
+ * @phpstan-return mvc_router_params
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, getParams);
-/**
- * Return all the routes defined in the router
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, getRoutes);
 /**
  * Returns a route object by its id
  *
@@ -189,9 +195,21 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, getRouteById);
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, getRouteByName);
 /**
+ * Return all the routes defined in the router
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, getRoutes);
+/**
  * Handles routing information received from the rewrite engine
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, handle);
+/**
+ * Loads routes from an array or Phalcon\Config\Config instance.
+ *
+ * @param array|\Phalcon\Config\ConfigInterface config
+ *
+ * @return RouterInterface
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, loadFromConfig);
 /**
  * Mounts a group of routes in the router
  */
@@ -210,6 +228,8 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, setDefaultController);
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, setDefaultModule);
 /**
  * Sets an array of default paths
+ *
+ * @phpstan-param mvc_router_defaults $defaults
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_RouterInterface, setDefaults);
 /**

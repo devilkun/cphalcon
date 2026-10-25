@@ -10,20 +10,10 @@
 
 namespace Phalcon\Forms\Element;
 
-use Phalcon\Tag;
-
 /**
  * Component TEXTAREA for forms
  */
 class TextArea extends AbstractElement
 {
-    /**
-     * Renders the element widget
-     */
-    public function render(array attributes = []) -> string
-    {
-        return Tag::textArea(
-            this->prepareAttributes(attributes)
-        );
-    }
+    protected string method = "inputTextarea";
 }

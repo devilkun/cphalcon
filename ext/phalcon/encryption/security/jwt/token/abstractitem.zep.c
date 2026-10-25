@@ -13,9 +13,8 @@
 
 #include "kernel/main.h"
 #include "kernel/object.h"
-#include "kernel/array.h"
-#include "kernel/operators.h"
 #include "kernel/memory.h"
+#include "kernel/array.h"
 
 
 /**
@@ -27,62 +26,44 @@
  * file that was distributed with this source code.
  */
 /**
- * Class AbstractItem
+ * Abstract helper class for Tokens
  *
- * @property array $data
+ * @phpstan-import-type encryption_jwt_item_data from EncryptionTypes
  */
 ZEPHIR_INIT_CLASS(Phalcon_Encryption_Security_JWT_Token_AbstractItem)
 {
 	ZEPHIR_REGISTER_CLASS(Phalcon\\Encryption\\Security\\JWT\\Token, AbstractItem, phalcon, encryption_security_jwt_token_abstractitem, phalcon_encryption_security_jwt_token_abstractitem_method_entry, ZEND_ACC_EXPLICIT_ABSTRACT_CLASS);
 
 	/**
-	 * @var array
+	 * @phpstan-var encryption_jwt_item_data
 	 */
-	zend_declare_property_null(phalcon_encryption_security_jwt_token_abstractitem_ce, SL("data"), ZEND_ACC_PROTECTED);
-	phalcon_encryption_security_jwt_token_abstractitem_ce->create_object = zephir_init_properties_Phalcon_Encryption_Security_JWT_Token_AbstractItem;
+	{
+		zval _zc0;
+		array_init_size(&_zc0, 1);
+		zephir_declare_typed_property(phalcon_encryption_security_jwt_token_abstractitem_ce, SL("data"), &_zc0, ZEND_ACC_PROTECTED, MAY_BE_ARRAY, NULL, 0);
+	}
 
 	return SUCCESS;
 }
 
-/**
- * @return string
- */
 PHP_METHOD(Phalcon_Encryption_Security_JWT_Token_AbstractItem, getEncoded)
 {
 	zval _0, _1;
+	zephir_method_globals *ZEPHIR_METHOD_GLOBALS_PTR = NULL;
 	zval *this_ptr = getThis();
 
 	ZVAL_UNDEF(&_0);
 	ZVAL_UNDEF(&_1);
-
-
-
-	zephir_read_property(&_0, this_ptr, ZEND_STRL("data"), PH_NOISY_CC | PH_READONLY);
-	zephir_array_fetch_string(&_1, &_0, SL("encoded"), PH_NOISY | PH_READONLY, "phalcon/Encryption/Security/JWT/Token/AbstractItem.zep", 30);
-	RETURN_CTORW(&_1);
-}
-
-zend_object *zephir_init_properties_Phalcon_Encryption_Security_JWT_Token_AbstractItem(zend_class_entry *class_type)
-{
-		zval _0, _1$$3;
-	zephir_method_globals *ZEPHIR_METHOD_GLOBALS_PTR = NULL;
-		ZVAL_UNDEF(&_0);
-	ZVAL_UNDEF(&_1$$3);
-	
-
-		ZEPHIR_MM_GROW();
-	
-	{
-		zval local_this_ptr, *this_ptr = &local_this_ptr;
-		ZEPHIR_CREATE_OBJECT(this_ptr, class_type);
-		zephir_read_property_ex(&_0, this_ptr, ZEND_STRL("data"), PH_NOISY_CC | PH_READONLY);
-		if (Z_TYPE_P(&_0) == IS_NULL) {
-			ZEPHIR_INIT_VAR(&_1$$3);
-			array_init(&_1$$3);
-			zephir_update_property_zval_ex(this_ptr, ZEND_STRL("data"), &_1$$3);
-		}
-		ZEPHIR_MM_RESTORE();
-		return Z_OBJ_P(this_ptr);
+	static zend_string *_zephir_prop_0 = NULL;
+	if (UNEXPECTED(!_zephir_prop_0)) {
+		_zephir_prop_0 = zend_string_init("data", 4, 1);
 	}
+	ZEPHIR_METHOD_GLOBALS_PTR = pecalloc(1, sizeof(zephir_method_globals), 0);
+	zephir_memory_grow_stack(ZEPHIR_METHOD_GLOBALS_PTR, __func__);
+
+	zephir_read_property_cached(&_0, this_ptr, _zephir_prop_0, 205, PH_NOISY_CC | PH_READONLY);
+	zephir_memory_observe(&_1);
+	zephir_array_fetch_string(&_1, &_0, SL("encoded"), PH_NOISY, "phalcon/Encryption/Security/JWT/Token/AbstractItem.zep", 29);
+	RETURN_CCTOR(&_1);
 }
 

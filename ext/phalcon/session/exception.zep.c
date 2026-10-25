@@ -15,9 +15,9 @@
 
 
 /**
- * This file is part of the Phalcon.
+ * This file is part of the Phalcon Framework.
  *
- * (c) Phalcon Team <team@phalcon.com>
+ * (c) Phalcon Team <team@phalcon.io>
  *
  * For the full copyright and license information, please view the LICENSE
  * file that was distributed with this source code.
@@ -29,7 +29,7 @@
  */
 ZEPHIR_INIT_CLASS(Phalcon_Session_Exception)
 {
-	ZEPHIR_REGISTER_CLASS_EX(Phalcon\\Session, Exception, phalcon, session_exception, phalcon_exception_ce, NULL, 0);
+	ZEPHIR_REGISTER_CLASS_EX(Phalcon\\Session, Exception, phalcon, session_exception, zend_ce_exception, NULL, 0);
 
 	return SUCCESS;
 }

@@ -10,58 +10,54 @@
 
 namespace Phalcon\Forms\Element;
 
-use InvalidArgumentException;
-use Phalcon\Forms\Form;
+use Phalcon\Contracts\Forms\FormsTypes;
+use Phalcon\Contracts\Html\HtmlTypes;
+use Phalcon\Di\Di;
+use Phalcon\Di\DiInterface;
+use Phalcon\Filter\Validation\ValidatorInterface;
 use Phalcon\Forms\Exception;
+use Phalcon\Forms\Exceptions\FormElementNameRequired;
+use Phalcon\Forms\Exceptions\InvalidFilterType;
+use Phalcon\Forms\Form;
+use Phalcon\Html\TagFactory;
 use Phalcon\Messages\MessageInterface;
 use Phalcon\Messages\Messages;
-use Phalcon\Tag;
-use Phalcon\Validation\ValidatorInterface;
+use Stringable;
 
 /**
  * This is a base class for form elements
+ *
+ * @phpstan-import-type forms_attributes from FormsTypes
+ * @phpstan-import-type forms_filters from FormsTypes
+ * @phpstan-import-type forms_options from FormsTypes
+ * @phpstan-import-type forms_validators from FormsTypes
+ * @phpstan-import-type html_attributes from HtmlTypes
  */
 abstract class AbstractElement implements ElementInterface
 {
     /**
-     * @var array
+     * @phpstan-var forms_attributes
      */
-    protected attributes = [];
+    protected array attributes = [];
 
     /**
-     * @var array
+     * @phpstan-var forms_filters
      */
-    protected filters = [];
-
+    protected array filters = [];
+    protected ?<Form> form = null;
+    protected ?string label = null;
+    protected <Messages> messages;
+    protected string method = "inputText";
+    protected string name;
     /**
-     * @var Form|null
+     * @phpstan-var forms_options
      */
-    protected form = null;
-
+    protected array options = [];
+    protected ?<TagFactory> tagFactory = null;
     /**
-     * @var string|null
+     * @phpstan-var forms_validators
      */
-    protected label = null;
-
-    /**
-     * @var Messages
-     */
-    protected messages;
-
-    /**
-     * @var string
-     */
-    protected name;
-
-    /**
-     * @var array
-     */
-    protected options = [];
-
-    /**
-     * @var array
-     */
-    protected validators = [];
+    protected array validators = [];
 
     /**
      * @var mixed|null
@@ -69,24 +65,21 @@ abstract class AbstractElement implements ElementInterface
     protected value = null;
 
     /**
-     * Phalcon\Forms\Element constructor
+     * Constructor
      *
-     * @param string name       Attribute name (value of 'name' attribute of HTML element)
-     * @param array  attributes Additional HTML element attributes
+     * @phpstan-param forms_attributes $attributes
      */
     public function __construct(string name, array attributes = [])
     {
         let name = trim(name);
 
         if unlikely empty name {
-            throw new InvalidArgumentException(
-                "Form element name is required"
-            );
+            throw new FormElementNameRequired();
         }
 
-        let this->name = name;
-        let this->attributes = attributes;
-        let this->messages = new Messages();
+        let this->name       = name,
+            this->attributes = attributes,
+            this->messages   = new Messages();
     }
 
     /**
@@ -102,19 +95,7 @@ abstract class AbstractElement implements ElementInterface
      */
     public function addFilter(string filter) -> <ElementInterface>
     {
-        var filters;
-
-        let filters = this->filters;
-
-        if typeof filters == "array" {
-            let this->filters[] = filter;
-        } else {
-            if typeof filters == "string" {
-                let this->filters = [filters, filter];
-            } else {
-                let this->filters = [filter];
-            }
-        }
+        let this->filters[] = filter;
 
         return this;
     }
@@ -132,19 +113,21 @@ abstract class AbstractElement implements ElementInterface
     /**
      * Adds a group of validators
      *
-     * @param \Phalcon\Validation\ValidatorInterface[] validators
-     * @param bool                                     merge
+     * @phpstan-param array<array-key, mixed> $validators
      */
-    public function addValidators(array! validators, bool merge = true) -> <ElementInterface>
+    public function addValidators(array validators, bool merge = true) -> <ElementInterface>
     {
-        if merge {
-            let validators = array_merge(
-                this->validators,
-                validators
-            );
+        var validator;
+
+        if unlikely !merge {
+            let this->validators = [];
         }
 
-        let this->validators = validators;
+        for validator in validators {
+            if validator instanceof ValidatorInterface {
+                this->addValidator(validator);
+            }
+        }
 
         return this;
     }
@@ -165,13 +148,10 @@ abstract class AbstractElement implements ElementInterface
     public function clear() -> <ElementInterface>
     {
         var form  = this->form,
-            name  = this->name,
-            value = this->value;
+            name  = this->name;
 
         if typeof form == "object" {
             form->clear(name);
-        } else {
-            Tag::setDefault(name, value);
         }
 
         return this;
@@ -195,6 +175,8 @@ abstract class AbstractElement implements ElementInterface
 
     /**
      * Returns the default attributes for the element
+     *
+     * @phpstan-return forms_attributes
      */
     public function getAttributes() -> array
     {
@@ -216,7 +198,7 @@ abstract class AbstractElement implements ElementInterface
     /**
      * Returns the element filters
      *
-     * @return mixed
+     * @phpstan-return forms_filters
      */
     public function getFilters()
     {
@@ -234,7 +216,7 @@ abstract class AbstractElement implements ElementInterface
     /**
      * Returns the element label
      */
-    public function getLabel() -> string
+    public function getLabel() -> string | null
     {
         return this->label;
     }
@@ -257,6 +239,14 @@ abstract class AbstractElement implements ElementInterface
     }
 
     /**
+     * Returns the tagFactory; throws exception if not present
+     */
+    public function getTagFactory() -> <TagFactory> | null
+    {
+        return this->tagFactory;
+    }
+
+    /**
      * Returns the value of an option if present
      */
     public function getUserOption(string option, var defaultValue = null) -> var
@@ -272,6 +262,8 @@ abstract class AbstractElement implements ElementInterface
 
     /**
      * Returns the options for the element
+     *
+     * @phpstan-return forms_options
      */
     public function getUserOptions() -> array
     {
@@ -280,6 +272,8 @@ abstract class AbstractElement implements ElementInterface
 
     /**
      * Returns the validators registered for the element
+     *
+     * @phpstan-return forms_validators
      */
     public function getValidators() -> <ValidatorInterface[]>
     {
@@ -303,15 +297,7 @@ abstract class AbstractElement implements ElementInterface
         }
 
         /**
-         * Otherwise check Phalcon\Tag
-         */
-        if Tag::hasValue(name) {
-            let value = Tag::getValue(name);
-        }
-
-        /**
-         * Assign the default value if there is no form available or
-         * Phalcon\Tag returns null
+         * Assign the default value if there is no form available
          */
         if value === null {
             let value = this->value;
@@ -330,15 +316,18 @@ abstract class AbstractElement implements ElementInterface
 
     /**
      * Generate the HTML to label the element
+     *
+     * @phpstan-param html_attributes $attributes
      */
     public function label(array attributes = []) -> string
     {
-        var internalAttributes, label, name, code;
+        var code, internalAttributes, labelName, name, tagFactory;
 
         /**
          * Check if there is an "id" attribute defined
          */
-        let internalAttributes = this->getAttributes();
+        let tagFactory         = this->getLocalTagFactory(),
+            internalAttributes = this->attributes;
 
         if !fetch name, internalAttributes["id"] {
             let name = this->name;
@@ -348,79 +337,48 @@ abstract class AbstractElement implements ElementInterface
             let attributes["for"] = name;
         }
 
-        let code = Tag::renderAttributes("<label", attributes);
-
         /**
          * Use the default label or leave the same name as label
          */
-        let label = this->label;
+        let labelName = this->label;
 
-        if label || is_numeric(label) {
-            let code .= ">" . label . "</label>";
-        } else {
-            let code .= ">" . name . "</label>";
+        if !(labelName || is_numeric(labelName)) {
+            let labelName = name;
         }
+
+        let code = tagFactory->{"label"}(labelName, attributes);
 
         return code;
     }
 
     /**
-     * Returns an array of prepared attributes for Phalcon\Tag helpers
-     * according to the element parameters
+     * Renders the element widget returning HTML
+     *
+     * @phpstan-param html_attributes $attributes
      */
-    public function prepareAttributes(array attributes = [], bool useChecked = false) -> array
+    public function render(array attributes = []) -> string
     {
-        var value, name, mergedAttributes, defaultAttributes, currentValue;
+        var helper, merged, method, name, result, tagFactory, value;
 
-        let name = this->name;
+        let name       = this->name,
+            value      = this->getValue(),
+            method     = this->method,
+            tagFactory = this->getLocalTagFactory(),
+            helper     = tagFactory->newInstance(method);
 
-        let attributes[0] = name;
-
-        /**
-         * Merge passed parameters with default ones
-         */
-        let defaultAttributes = this->attributes;
-
-        let mergedAttributes = array_merge(
-            defaultAttributes,
-            attributes
-        );
-
-        /**
-         * Get the current element value
-         */
-        let value = this->getValue();
-
-        /**
-         * If the widget has a value set it as default value
-         */
-        if value !== null {
-            if useChecked {
-                /**
-                 * Check if the element already has a default value, compare it
-                 * with the one in the attributes, if they are the same mark the
-                 * element as checked
-                 */
-                if fetch currentValue, mergedAttributes["value"] {
-                    if currentValue == value {
-                        let mergedAttributes["checked"] = "checked";
-                    }
-                } else {
-                    /**
-                     * Evaluate the current value and mark the check as checked
-                     */
-                    if value {
-                        let mergedAttributes["checked"] = "checked";
-                    }
-
-                    let mergedAttributes["value"] = value;
-                }
-            } else {
-                let mergedAttributes["value"] = value;
-            }
+        if isset attributes["value"] {
+            let value = attributes["value"];
+            unset attributes["value"];
         }
 
-        return mergedAttributes;
+        if value !== null {
+            let value = (string) value;
+        }
+
+        let merged = array_merge(this->attributes, attributes),
+            result = helper->__invoke(name, value, merged);
+
+        return (string) result;
     }
 
     /**
@@ -435,8 +393,10 @@ abstract class AbstractElement implements ElementInterface
 
     /**
      * Sets default attributes for the element
+     *
+     * @phpstan-param forms_attributes $attributes
      */
-    public function setAttributes(array! attributes) -> <ElementInterface>
+    public function setAttributes(array attributes) -> <ElementInterface>
     {
         let this->attributes = attributes;
 
@@ -457,12 +417,16 @@ abstract class AbstractElement implements ElementInterface
     /**
      * Sets the element filters
      *
-     * @param array|string filters
+     * @phpstan-param forms_filters|string $filters
      */
     public function setFilters(var filters) -> <ElementInterface>
     {
         if unlikely (typeof filters != "string" && typeof filters != "array") {
-            throw new Exception("Wrong filter type added");
+            throw new InvalidFilterType();
+        }
+
+        if typeof filters == "string" {
+            let filters = [filters];
         }
 
         let this->filters = filters;
@@ -503,9 +467,19 @@ abstract class AbstractElement implements ElementInterface
     /**
      * Sets the element name
      */
-    public function setName(string! name) -> <ElementInterface>
+    public function setName(string name) -> <ElementInterface>
     {
         let this->name = name;
+
+        return this;
+    }
+
+    /**
+     * Sets the TagFactory
+     */
+    public function setTagFactory(<TagFactory> tagFactory) -> <static>
+    {
+        let this->tagFactory = tagFactory;
 
         return this;
     }
@@ -522,11 +496,51 @@ abstract class AbstractElement implements ElementInterface
 
     /**
      * Sets options for the element
+     *
+     * @phpstan-param forms_options $options
      */
     public function setUserOptions(array options) -> <ElementInterface>
     {
         let this->options = options;
 
         return this;
+    }
+
+    /**
+     * Returns the tagFactory; throws exception if not present
+     */
+    protected function getLocalTagFactory() -> <TagFactory>
+    {
+        var container, tagFactory;
+
+        let tagFactory = null;
+
+        if unlikely empty this->tagFactory {
+            /**
+             * Check the form for the TagFactory
+             */
+            if this->form !== null {
+                let tagFactory = this->form->getTagFactory();
+            }
+
+            /**
+             * Check the DI container
+             */
+            if tagFactory === null {
+                let container = Di::getDefault();
+
+                if container !== null && true === container->has("tag") {
+                    let tagFactory = container->getShared("tag");
+                }
+            }
+
+            if unlikely tagFactory === null {
+                throw Exception::tagFactoryNotFound();
+            }
+
+            let this->tagFactory = tagFactory;
+        }
+
+        return this->tagFactory;
     }
 }

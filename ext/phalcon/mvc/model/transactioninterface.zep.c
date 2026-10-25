@@ -21,8 +21,6 @@
  * file that was distributed with this source code.
  */
 /**
- * Phalcon\Mvc\Model\TransactionInterface
- *
  * Interface for Phalcon\Mvc\Model\Transaction
  */
 ZEPHIR_INIT_CLASS(Phalcon_Mvc_Model_TransactionInterface)
@@ -46,6 +44,8 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_TransactionInterface, commit);
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_TransactionInterface, getConnection);
 /**
  * Returns validations messages from last save try
+ *
+ * @phpstan-return array<array-key, mixed>
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_TransactionInterface, getMessages);
 /**
@@ -65,13 +65,13 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_TransactionInterface, rollback);
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_TransactionInterface, setIsNewTransaction);
 /**
- * Sets flag to rollback on abort the HTTP connection
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_TransactionInterface, setRollbackOnAbort);
-/**
  * Sets object which generates rollback action
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_TransactionInterface, setRollbackedRecord);
+/**
+ * Sets flag to rollback on abort the HTTP connection
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_Model_TransactionInterface, setRollbackOnAbort);
 /**
  * Sets transaction manager related to the transaction
  */

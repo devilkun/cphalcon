@@ -1,0 +1,160 @@
+
+#ifdef HAVE_CONFIG_H
+#include "../../../../ext_config.h"
+#endif
+
+#include <php.h>
+#include "../../../../php_ext.h"
+#include "../../../../ext.h"
+
+#include <Zend/zend_exceptions.h>
+
+#include "kernel/main.h"
+
+
+/**
+ * This file is part of the Phalcon Framework.
+ *
+ * (c) Phalcon Team <team@phalcon.io>
+ *
+ * For the full copyright and license information, please view the LICENSE.txt
+ * file that was distributed with this source code.
+ */
+/**
+ * Canonical contract for Phalcon\Acl adapters
+ *
+ * @phpstan-import-type acl_access_list from AclTypes
+ * @phpstan-import-type acl_component_name from AclTypes
+ * @phpstan-import-type acl_components from AclTypes
+ * @phpstan-import-type acl_role_name from AclTypes
+ * @phpstan-import-type acl_role_to_inherit from AclTypes
+ * @phpstan-import-type acl_roles from AclTypes
+ */
+ZEPHIR_INIT_CLASS(Phalcon_Contracts_Acl_Adapter_Adapter)
+{
+	ZEPHIR_REGISTER_INTERFACE(Phalcon\\Contracts\\Acl\\Adapter, Adapter, phalcon, contracts_acl_adapter_adapter, phalcon_contracts_acl_adapter_adapter_method_entry);
+
+	return SUCCESS;
+}
+
+/**
+ * Adds a component to the ACL list
+ *
+ * Access names can be a particular action, for instance `search`, `update`
+ * `delete` etc. or a list of them.
+ *
+ * @phpstan-param ComponentInterface|string $componentValue
+ * @phpstan-param acl_access_list           $accessList
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, addComponent);
+/**
+ * Adds access to components
+ *
+ * @phpstan-param acl_access_list $accessList
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, addComponentAccess);
+/**
+ * Add a role which inherits from an existing role
+ *
+ * @phpstan-param acl_role_to_inherit $roleToInherits
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, addInherit);
+/**
+ * Adds a role to the ACL list. The second parameter lets to inherit access
+ * from an existing role
+ *
+ * @phpstan-param RoleInterface|string     $role
+ * @phpstan-param acl_role_to_inherit|null $accessInherits
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, addRole);
+/**
+ * Allow access to a role on a component. You can use `*` as wildcard
+ *
+ * @phpstan-param acl_access_list $access
+ *
+ * @phpstan-param callable|null $func
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, allow);
+/**
+ * Deny access to a role on a component. You can use `*` as wildcard
+ *
+ * @phpstan-param acl_access_list $access
+ *
+ * @phpstan-param callable|null $func
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, deny);
+/**
+ * Removes access from a component
+ *
+ * @phpstan-param acl_access_list $accessList
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, dropComponentAccess);
+/**
+ * Returns the access which the list is checking if a role can access it
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, getActiveAccess);
+/**
+ * Returns the component which the list is checking if some role can access
+ * it
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, getActiveComponent);
+/**
+ * Returns the role which the list is checking if it's allowed to certain
+ * component/access
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, getActiveRole);
+/**
+ * Return an array with every component registered in the list
+ *
+ * @phpstan-return acl_components
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, getComponents);
+/**
+ * Returns the default action
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, getDefaultAction);
+/**
+ * Returns the inherited roles for a passed role name. If no role name
+ * has been specified it will return the whole array. If the role has not
+ * been found it returns an empty array
+ *
+ * @return array<int|string, array<int, string>|string>
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, getInheritedRoles);
+/**
+ * Returns the default ACL access level for no arguments provided in
+ * `isAllowed` action if a `function` (callable) exists for `accessKey`
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, getNoArgumentsDefaultAction);
+/**
+ * Return an array with every role registered in the list
+ *
+ * @phpstan-return acl_roles
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, getRoles);
+/**
+ * Check whether a role is allowed to access an action from a component
+ *
+ * @phpstan-param acl_role_name      $roleName
+ * @phpstan-param acl_component_name $componentName
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, isAllowed);
+/**
+ * Check whether a component exists in the components list
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, isComponent);
+/**
+ * Check whether role exist in the roles list
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, isRole);
+/**
+ * Sets the default access level
+ * (Phalcon\Acl\Enum::ALLOW or Phalcon\Acl\Enum::DENY)
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, setDefaultAction);
+/**
+ * Sets the default access level (Phalcon\Acl\Enum::ALLOW or
+ * Phalcon\Acl\Enum::DENY) for no arguments provided in isAllowed action if
+ * there exists func for accessKey
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Contracts_Acl_Adapter_Adapter, setNoArgumentsDefaultAction);

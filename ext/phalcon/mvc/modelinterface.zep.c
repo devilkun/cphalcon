@@ -24,6 +24,12 @@
  * Phalcon\Mvc\ModelInterface
  *
  * Interface for Phalcon\Mvc\Model
+ *
+ * @template T
+ *
+ * @phpstan-import-type mvc_model_data from MvcTypes
+ * @phpstan-import-type mvc_model_parameters from MvcTypes
+ * @phpstan-import-type mvc_model_snapshot from MvcTypes
  */
 ZEPHIR_INIT_CLASS(Phalcon_Mvc_ModelInterface)
 {
@@ -32,6 +38,109 @@ ZEPHIR_INIT_CLASS(Phalcon_Mvc_ModelInterface)
 	return SUCCESS;
 }
 
+/**
+ * Allows to calculate the average value on a column matching the specified
+ * conditions
+ *
+ * @param array parameters
+ * @return ResultsetInterface|float
+ *
+ * @phpstan-param mvc_model_parameters $parameters
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, average);
+/**
+ * Assigns values to a model from an array returning a new model
+ *
+ * @phpstan-param mvc_model_data $data
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, cloneResult);
+/**
+ * Assigns values to a model from an array returning a new model
+ *
+ * @param ModelInterface|\Phalcon\Mvc\Model\Row base
+ * @param mixed columnMap
+ * @param int dirtyState
+ * @param bool keepSnapshots
+ *
+ * @return ModelInterface
+ *
+ * @phpstan-param mvc_model_data $data
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, cloneResultMap);
+/**
+ * Returns an hydrated result based on the data and the column map
+ *
+ * @param array columnMap
+ *
+ * @phpstan-param mvc_model_data $data
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, cloneResultMapHydrate);
+/**
+ * Allows to count how many records match the specified conditions
+ *
+ * Returns an integer for simple queries or a ResultsetInterface
+ * instance for when the GROUP condition is used. The results will
+ * contain the count of each group.
+ *
+ * @param array|string|null parameters
+ *
+ * @phpstan-param mvc_model_parameters $parameters
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, count);
+/**
+ * Allows to query a set of records that match the specified conditions.
+ *
+ * This is one of four ways to express a query against a model, each with an
+ * intended lane:
+ *
+ * - find-parameter arrays (this method) for simple lookups;
+ * - `Phalcon\Mvc\Model\Query\Builder` as the canonical programmatic API;
+ * - `Phalcon\Mvc\Model\Criteria` as request-bound convenience;
+ * - raw PHQL via `Phalcon\Mvc\Model\Query` for everything else.
+ *
+ * @param array|string|int|null parameters
+ *
+ * @return T[]|\Phalcon\Mvc\Model\Resultset<int, T>
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, find);
+/**
+ * Allows to query the first record that match the specified conditions
+ *
+ * @param array parameters
+ * @return T|\Phalcon\Mvc\ModelInterface|\Phalcon\Mvc\Model\Row|null
+ *
+ * TODO: Current method signature must be reviewed in v5. As it must return only ?ModelInterface (it also returns Row).
+ * @see https://github.com/phalcon/cphalcon/issues/15212
+ * @see https://github.com/phalcon/cphalcon/issues/15883
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, findFirst);
+/**
+ * Allows to get the maximum value of a column that match the specified
+ * conditions
+ *
+ * @param array parameters
+ * @return mixed
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, maximum);
+/**
+ * Allows to get the minimum value of a column that match the specified
+ * conditions
+ *
+ * @param array parameters
+ * @return mixed
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, minimum);
+/**
+ * Create a criteria for a specific model
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, query);
+/**
+ * Allows to calculate a sum on a column that match the specified conditions
+ *
+ * @param array parameters
+ * @return float|ResultsetInterface
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, sum);
 /**
  * Appends a customized message on the validation process
  */
@@ -44,47 +153,10 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, appendMessage);
  * @param mixed dataColumnMap Array to transform keys of data to another
  *
  * @return ModelInterface
+ *
+ * @phpstan-param mvc_model_data $data
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, assign);
-/**
- * Allows to calculate the average value on a column matching the specified
- * conditions
- *
- * @param array parameters
- * @return ResultsetInterface|float
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, average);
-/**
- * Assigns values to a model from an array returning a new model
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, cloneResult);
-/**
- * Assigns values to a model from an array returning a new model
- *
- * @param ModelInterface|\Phalcon\Mvc\Model\Row base
- * @param mixed columnMap
- * @param int dirtyState
- * @param bool keepSnapshots
- *
- * @return ModelInterface
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, cloneResultMap);
-/**
- * Returns an hydrated result based on the data and the column map
- *
- * @param array columnMap
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, cloneResultMapHydrate);
-/**
- * Allows to count how many records match the specified conditions
- *
- * Returns an integer for simple queries or a ResultsetInterface
- * instance for when the GROUP condition is used. The results will
- * contain the count of each group.
- *
- * @param array|string|null parameters
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, count);
 /**
  * Inserts a model instance. If the instance already exists in the
  * persistence it will throw an exception. Returning true on success or
@@ -95,24 +167,6 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, create);
  * Deletes a model instance. Returning true on success or false otherwise.
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, delete);
-/**
- * Allows to query a set of records that match the specified conditions
- *
- * @param array|string|int|null parameters
- *
- * @return ResultsetInterface
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, find);
-/**
- * Allows to query the first record that match the specified conditions
- *
- * @param array parameters
- * @return \Phalcon\Mvc\ModelInterface|\Phalcon\Mvc\Model\Row|null
- *
- * TODO: Current method signature must be reviewed in v5. As it must return only ?ModelInterface.
- * @see https://github.com/phalcon/cphalcon/issues/15212
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, findFirst);
 /**
  * Fires an event, implicitly calls behaviors and listeners in the events
  * manager are notified
@@ -175,26 +229,6 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, getWriteConnection);
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, getWriteConnectionService);
 /**
- * Allows to get the maximum value of a column that match the specified
- * conditions
- *
- * @param array parameters
- * @return mixed
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, maximum);
-/**
- * Allows to get the minimum value of a column that match the specified
- * conditions
- *
- * @param array parameters
- * @return mixed
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, minimum);
-/**
- * Create a criteria for a specific model
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, query);
-/**
  * Refreshes the model attributes re-querying the record from the database
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, refresh);
@@ -221,8 +255,19 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, setReadConnectionService);
  * snapshot data when the model was set up to keep snapshot data
  *
  * @param array columnMap
+ *
+ * @phpstan-param mvc_model_data $data
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, setSnapshotData);
+/**
+ * Marks one or more many-to-many relationships to be synchronized (or not)
+ * on the next save() call.
+ *
+ * @param string|array|null elements
+ *
+ * @phpstan-param mvc_model_data $elements
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, setSync);
 /**
  * Sets a transaction related to the Model instance
  */
@@ -236,19 +281,12 @@ ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, setWriteConnectionService);
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, skipOperation);
 /**
- * Allows to calculate a sum on a column that match the specified conditions
- *
- * @param array parameters
- * @return float|ResultsetInterface
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, sum);
-/**
- * Check whether validation process has generated any messages
- */
-ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, validationHasFailed);
-/**
- * Updates a model instance. If the instance doesn't exist in the
+ * Updates a model instance. If the instance does not exist in the
  * persistence it will throw an exception. Returning true on success or
  * false otherwise.
  */
 ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, update);
+/**
+ * Check whether validation process has generated any messages
+ */
+ZEPHIR_DOC_METHOD(Phalcon_Mvc_ModelInterface, validationHasFailed);

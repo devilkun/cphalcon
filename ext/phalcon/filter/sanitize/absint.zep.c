@@ -27,14 +27,13 @@
  * file that was distributed with this source code.
  */
 /**
- * Phalcon\Filter\Sanitize\AbsInt
- *
  * Sanitizes a value to absolute integer
  */
 ZEPHIR_INIT_CLASS(Phalcon_Filter_Sanitize_AbsInt)
 {
 	ZEPHIR_REGISTER_CLASS(Phalcon\\Filter\\Sanitize, AbsInt, phalcon, filter_sanitize_absint, phalcon_filter_sanitize_absint_method_entry, 0);
 
+	zend_class_implements(phalcon_filter_sanitize_absint_ce, 1, phalcon_contracts_filter_sanitizer_ce);
 	return SUCCESS;
 }
 
@@ -48,28 +47,21 @@ PHP_METHOD(Phalcon_Filter_Sanitize_AbsInt, __invoke)
 	zephir_method_globals *ZEPHIR_METHOD_GLOBALS_PTR = NULL;
 	zend_long ZEPHIR_LAST_CALL_STATUS;
 	zval *input, input_sub, _0, _1;
-	zval *this_ptr = getThis();
 
 	ZVAL_UNDEF(&input_sub);
 	ZVAL_UNDEF(&_0);
 	ZVAL_UNDEF(&_1);
-#if PHP_VERSION_ID >= 80000
-	bool is_null_true = 1;
 	ZEND_PARSE_PARAMETERS_START(1, 1)
 		Z_PARAM_ZVAL(input)
 	ZEND_PARSE_PARAMETERS_END();
-#endif
-
-
-	ZEPHIR_MM_GROW();
+	ZEPHIR_METHOD_GLOBALS_PTR = pecalloc(1, sizeof(zephir_method_globals), 0);
+	zephir_memory_grow_stack(ZEPHIR_METHOD_GLOBALS_PTR, __func__);
 	zephir_fetch_params(1, 1, 0, &input);
-
-
 	ZVAL_LONG(&_0, 519);
-	ZEPHIR_CALL_FUNCTION(&_1, "filter_var", NULL, 290, input, &_0);
+	ZEPHIR_CALL_FUNCTION(&_1, "filter_var", NULL, 0, input, &_0);
 	zephir_check_call_status();
 	ZVAL_LONG(&_0, zephir_get_intval(&_1));
-	ZEPHIR_RETURN_CALL_FUNCTION("abs", NULL, 291, &_0);
+	ZEPHIR_RETURN_CALL_FUNCTION("abs", NULL, 0, &_0);
 	zephir_check_call_status();
 	RETURN_MM();
 }

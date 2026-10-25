@@ -10,16 +10,26 @@
 
 namespace Phalcon\Mvc\Model\Query;
 
+use Phalcon\Contracts\Mvc\MvcTypes;
 use Phalcon\Mvc\Model\QueryInterface;
 
 /**
- * Phalcon\Mvc\Model\Query\BuilderInterface
- *
  * Interface for Phalcon\Mvc\Model\Query\Builder
+ *
+ * @phpstan-import-type mvc_model_bind_params from MvcTypes
+ * @phpstan-import-type mvc_model_bind_types from MvcTypes
+ * @phpstan-import-type mvc_query_columns from MvcTypes
+ * @phpstan-import-type mvc_query_order from MvcTypes
  */
 interface BuilderInterface
 {
+    /**
+     * @var string
+     */
     const OPERATOR_AND = "and";
+    /**
+     * @var string
+     */
     const OPERATOR_OR = "or";
 
     /**
@@ -29,21 +39,65 @@ interface BuilderInterface
 
     /**
      * Appends a condition to the current conditions using a AND operator
+     *
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
     public function andWhere(string conditions, array bindParams = [], array bindTypes = []) -> <BuilderInterface>;
 
     /**
      * Appends a BETWEEN condition to the current conditions
      *
-     * @param mixed minimum
-     * @param mixed maximum
+     * @param mixed  $minimum
+     * @param mixed  $maximum
      */
-    public function betweenWhere(string! expr, minimum, maximum, string! operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>;
+    public function betweenWhere(string expr, minimum, maximum,  string operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>;
 
     /**
-     * Sets the columns to be queried
+     * Sets the columns to be queried. The columns can be either a `string` or
+     * an `array` of strings. If the argument is a (single, non-embedded) string,
+     * its content can specify one or more columns, separated by commas, the same
+     * way that one uses the SQL select statement. You can use aliases, aggregate
+     * functions, etc. If you need to reference other models you will need to
+     * reference them with their namespaces.
      *
-     * @param string|array columns
+     * When using an array as a parameter, you will need to specify one field
+     * per array element. If a non-numeric key is defined in the array, it will
+     * be used as the alias in the query
+     *
+     *```php
+     * <?php
+     *
+     * // String, comma separated values
+     * $builder->columns("id, name");
+     *
+     * // Array, one column per element
+     * $builder->columns(
+     *     [
+     *         "inv_id",
+     *         "inv_title",
+     *     ]
+     * );
+     *
+     * // Array, named keys. The name of the key acts as an alias (`AS` clause)
+     * $builder->columns(
+     *     [
+     *         "inv_title",
+     *         "number" => "COUNT(*)",
+     *     ]
+     * );
+     *
+     * // Different models
+     * $builder->columns(
+     *     [
+     *         "\Phalcon\Models\Invoices.*",
+     *         "\Phalcon\Models\Customers.cst_name_first",
+     *         "\Phalcon\Models\Customers.cst_name_last",
+     *     ]
+     * );
+     *```
+     *
+     * @param string|array $columns
      */
     public function columns(columns) -> <BuilderInterface>;
 
@@ -69,24 +123,28 @@ interface BuilderInterface
     /**
      * Sets the models who makes part of the query
      *
-     * @param string|array models
+     * @phpstan-param mvc_query_columns $models
      */
     public function from(models) -> <BuilderInterface>;
 
     /**
      * Returns default bind params
+     *
+     * @phpstan-return mvc_model_bind_params
      */
     public function getBindParams() -> array;
 
     /**
      * Returns default bind types
+     *
+     * @phpstan-return mvc_model_bind_types
      */
     public function getBindTypes() -> array;
 
     /**
      * Return the columns to be queried
      *
-     * @return string|array
+     * @phpstan-return mvc_query_columns|null
      */
     public function getColumns();
 
@@ -98,31 +156,42 @@ interface BuilderInterface
     /**
      * Return the models who makes part of the query
      *
-     * @return string|array
+     * @phpstan-return mvc_query_columns|null
      */
     public function getFrom();
 
     /**
      * Returns the GROUP BY clause
+     *
+     * @phpstan-return array<array-key, string>
      */
     public function getGroupBy() -> array;
 
     /**
      * Returns the HAVING condition clause
      */
-    public function getHaving() -> string;
+    public function getHaving() -> string | null;
 
     /**
      * Return join parts of the query
+     *
+     * @phpstan-return array<array-key, mixed>
      */
     public function getJoins() -> array;
 
     /**
      * Returns the current LIMIT clause
      *
-     * @return string|array
+     * @phpstan-return array<array-key, mixed>|int|string|null
      */
     public function getLimit();
+
+    /**
+     * Returns the models involved in the query
+     *
+     * @phpstan-return mvc_query_columns|null
+     */
+    public function getModels() -> array | string | null;
 
     /**
      * Returns the current OFFSET clause
@@ -132,7 +201,7 @@ interface BuilderInterface
     /**
      * Return the set ORDER BY clause
      *
-     * @return string|array
+     * @phpstan-return array<array-key, int|string>|string|null
      */
     public function getOrderBy();
 
@@ -149,21 +218,24 @@ interface BuilderInterface
     /**
      * Return the conditions for the query
      *
-     * @return string|array
+     * @phpstan-return array<array-key, mixed>|string|null
      */
     public function getWhere();
 
     /**
      * Sets a GROUP BY clause
      *
-     * @param string|array group
+     * @phpstan-param array<array-key, string>|string|null $group
      */
     public function groupBy(var group) -> <BuilderInterface>;
 
     /**
      * Sets a HAVING condition clause
+     *
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
-    public function having(string conditions) -> <BuilderInterface>;
+    public function having(string conditions, array bindParams = [], array bindTypes = []) -> <BuilderInterface>;
 
     /**
      * Adds an INNER join to the query
@@ -172,16 +244,13 @@ interface BuilderInterface
 
     /**
      * Appends an IN condition to the current conditions
+     *
+     * @phpstan-param array<array-key, mixed> $values
      */
-    public function inWhere(string! expr, array! values, string! operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>;
+    public function inWhere(string expr,  array values,  string operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>;
 
     /**
      * Adds an :type: join (by default type - INNER) to the query
-     *
-     * @param string model
-     * @param string conditions
-     * @param string alias
-     * @return BuilderInterface
      */
     public function join(string model, string conditions = null, string alias = null) -> <BuilderInterface>;
 
@@ -192,28 +261,20 @@ interface BuilderInterface
 
     /**
      * Sets a LIMIT clause
-     *
-     * @param int offset
      */
     public function limit(int limit, offset = null) -> <BuilderInterface>;
 
     /**
-     * Returns the models involved in the query
-     */
-    public function getModels() -> string | array | null;
-
-    /**
      * Appends a NOT BETWEEN condition to the current conditions
-     *
-     * @param mixed minimum
-     * @param mixed maximum
      */
-    public function notBetweenWhere(string! expr, minimum, maximum, string! operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>;
+    public function notBetweenWhere(string expr, minimum, maximum,  string operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>;
 
     /**
      * Appends a NOT IN condition to the current conditions
+     *
+     * @phpstan-param array<array-key, mixed> $values
      */
-    public function notInWhere(string! expr, array! values, string! operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>;
+    public function notInWhere(string expr,  array values,  string operator = BuilderInterface::OPERATOR_AND) -> <BuilderInterface>;
 
     /**
      * Sets an OFFSET clause
@@ -222,15 +283,17 @@ interface BuilderInterface
 
     /**
      * Sets an ORDER BY condition clause
-     *
-     * @param array|string orderBy
      */
     public function orderBy(var orderBy) -> <BuilderInterface>;
 
     /**
      * Appends a condition to the current conditions using an OR operator
+     *
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
     public function orWhere(string conditions, array bindParams = [], array bindTypes = []) -> <BuilderInterface>;
+
 
     /**
      * Adds a RIGHT join to the query
@@ -239,16 +302,31 @@ interface BuilderInterface
 
     /**
      * Set default bind parameters
+     *
+     * @phpstan-param mvc_model_bind_params $bindParams
      */
-    public function setBindParams(array! bindParams, bool merge = false) -> <BuilderInterface>;
+    public function setBindParams(array bindParams, bool merge = false) -> <BuilderInterface>;
 
     /**
      * Set default bind types
+     *
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
-    public function setBindTypes(array! bindTypes, bool merge = false) -> <BuilderInterface>;
+    public function setBindTypes(array bindTypes, bool merge = false) -> <BuilderInterface>;
 
     /**
      * Sets conditions for the query
+     *
+     * @phpstan-param mvc_model_bind_params $bindParams
+     * @phpstan-param mvc_model_bind_types $bindTypes
      */
     public function where(string conditions, array bindParams = [], array bindTypes = []) -> <BuilderInterface>;
+
+    // TODO v7: promote the custom resultset-row-class accessors into this
+    // interface. They are implemented on Phalcon\Mvc\Model\Query\Builder but
+    // are kept out of the contract in 5.x to avoid breaking existing
+    // BuilderInterface implementations in the wild.
+    //
+    // public function getResultsetRowClass() -> string;
+    // public function setResultsetRowClass(string resultsetRowClass) -> <BuilderInterface>;
 }

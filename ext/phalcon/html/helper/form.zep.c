@@ -20,15 +20,21 @@
 
 
 /**
- * This file is part of the Phalcon.
+ * This file is part of the Phalcon Framework.
  *
- * (c) Phalcon Team <team@phalcon.com>
+ * (c) Phalcon Team <team@phalcon.io>
  *
  * For the full copyright and license information, please view the LICENSE
  * file that was distributed with this source code.
+ *
+ * Implementation of this file has been influenced by AuraPHP
+ * @link    https://github.com/auraphp/Aura.Html
+ * @license https://github.com/auraphp/Aura.Html/blob/2.x/LICENSE
  */
 /**
  * Class Form
+ *
+ * @phpstan-import-type html_attributes from HtmlTypes
  */
 ZEPHIR_INIT_CLASS(Phalcon_Html_Helper_Form)
 {
@@ -40,10 +46,9 @@ ZEPHIR_INIT_CLASS(Phalcon_Html_Helper_Form)
 /**
  * Produce a `<form>` tag.
  *
- * @param array $attributes
+ * @phpstan-param html_attributes $attributes
  *
  * @return string
- * @throws Exception
  */
 PHP_METHOD(Phalcon_Html_Helper_Form, __invoke)
 {
@@ -57,16 +62,12 @@ PHP_METHOD(Phalcon_Html_Helper_Form, __invoke)
 	ZVAL_UNDEF(&overrides);
 	ZVAL_UNDEF(&_0);
 	ZVAL_UNDEF(&_1);
-#if PHP_VERSION_ID >= 80000
-	bool is_null_true = 1;
 	ZEND_PARSE_PARAMETERS_START(0, 1)
 		Z_PARAM_OPTIONAL
-		Z_PARAM_ARRAY(attributes)
+		ZEPHIR_Z_PARAM_ARRAY(attributes, attributes_param)
 	ZEND_PARSE_PARAMETERS_END();
-#endif
-
-
-	ZEPHIR_MM_GROW();
+	ZEPHIR_METHOD_GLOBALS_PTR = pecalloc(1, sizeof(zephir_method_globals), 0);
+	zephir_memory_grow_stack(ZEPHIR_METHOD_GLOBALS_PTR, __func__);
 	zephir_fetch_params(1, 0, 1, &attributes_param);
 	if (!attributes_param) {
 		ZEPHIR_INIT_VAR(&attributes);
@@ -74,18 +75,16 @@ PHP_METHOD(Phalcon_Html_Helper_Form, __invoke)
 	} else {
 		zephir_get_arrval(&attributes, attributes_param);
 	}
-
-
 	ZEPHIR_INIT_VAR(&overrides);
 	zephir_create_array(&overrides, 2, 0);
 	add_assoc_stringl_ex(&overrides, SL("method"), SL("post"));
 	add_assoc_stringl_ex(&overrides, SL("enctype"), SL("multipart/form-data"));
-	ZEPHIR_CALL_METHOD(&_0, this_ptr, "orderattributes", NULL, 0, &overrides, &attributes);
+	ZEPHIR_CALL_METHOD(&_0, this_ptr, "orderAttributes", NULL, 0, &overrides, &attributes);
 	zephir_check_call_status();
 	ZEPHIR_CPY_WRT(&overrides, &_0);
 	ZEPHIR_INIT_VAR(&_1);
 	ZVAL_STRING(&_1, "form");
-	ZEPHIR_RETURN_CALL_METHOD(this_ptr, "renderelement", NULL, 0, &_1, &overrides);
+	ZEPHIR_RETURN_CALL_METHOD(this_ptr, "renderElement", NULL, 0, &_1, &overrides);
 	zephir_check_call_status();
 	RETURN_MM();
 }

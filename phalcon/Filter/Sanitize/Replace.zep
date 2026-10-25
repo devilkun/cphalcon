@@ -10,17 +10,17 @@
 
 namespace Phalcon\Filter\Sanitize;
 
+use Phalcon\Contracts\Filter\Sanitizer;
+
 /**
- * Phalcon\Filter\Sanitize\Replace
- *
  * Sanitizes a value replacing parts of a string
  */
-class Replace
+class Replace implements Sanitizer
 {
     /**
-     * @param mixed $input
-     * @param mixed $source
-     * @param mixed $target
+     * @param string|string[] $input
+     * @param string|string[] $from
+     * @param string|string[] $to
      *
      * @return string|string[]
      */

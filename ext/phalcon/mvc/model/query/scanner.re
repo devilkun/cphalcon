@@ -19,17 +19,67 @@
 #define YYCTYPE unsigned char
 #define YYCURSOR (s->start)
 #define YYLIMIT (s->end)
-#define YYMARKER q
+#define YYMARKER marker
+
+/**
+ * Copies a string literal and replaces its escape sequences with the
+ * characters they name. The scanner must do this, because the dialect
+ * escapes the value again for the target database. An unknown sequence
+ * keeps its backslash, the same as MySQL and PHP do, so a LIKE pattern
+ * such as "\\%" continues to match a percent sign.
+ */
+static char *phql_unescape_string(const char *source, unsigned int length, unsigned int *result_length) {
+
+	char *result = emalloc(length + 1);
+	unsigned int i, j = 0;
+
+	for (i = 0; i < length; i++) {
+
+		if (source[i] != '\\' || i + 1 == length) {
+			result[j++] = source[i];
+			continue;
+		}
+
+		i++;
+
+		switch (source[i]) {
+			case 'n':
+				result[j++] = '\n';
+				break;
+			case 'r':
+				result[j++] = '\r';
+				break;
+			case 't':
+				result[j++] = '\t';
+				break;
+			case '\\':
+			case '\'':
+			case '"':
+				result[j++] = source[i];
+				break;
+			default:
+				result[j++] = '\\';
+				result[j++] = source[i];
+				break;
+		}
+	}
+
+	result[j] = '\0';
+	*result_length = j;
+
+	return result;
+}
 
 int phql_get_token(phql_scanner_state *s, phql_scanner_token *token) {
 
 	char *q = YYCURSOR;
+	char *marker = YYCURSOR;
 	int status = PHQL_SCANNER_RETCODE_IMPOSSIBLE;
 
 	/*!re2c
 	ESCQQ           = [\\]["];
 	ESCQ            = [\\]['];
-	ESCSEQ          = [\\].;
+	ESCSEQ          = [\\][^\n\x00];
 	ANYNOEOF        = [\001-\377];
 	PRINTABLE       = [^\x00-\x1F\x7F];
 
@@ -98,8 +148,8 @@ int phql_get_token(phql_scanner_state *s, phql_scanner_token *token) {
 		SPLACEHOLDER = ":"[a-zA-Z0-9_\-]+":";
 		SPLACEHOLDER {
 			token->opcode = PHQL_T_SPLACEHOLDER;
-			token->value = estrndup(q, YYCURSOR - q - 1);
-			token->len = YYCURSOR - q - 1;
+			token->value = estrndup(q + 1, YYCURSOR - q - 2);
+			token->len = YYCURSOR - q - 2;
 			q = YYCURSOR;
 			return 0;
 		}
@@ -107,8 +157,8 @@ int phql_get_token(phql_scanner_state *s, phql_scanner_token *token) {
 		BPLACEHOLDER = "{"[a-zA-Z0-9_:\-]+"}";
 		BPLACEHOLDER {
 			token->opcode = PHQL_T_BPLACEHOLDER;
-			token->value = estrndup(q, YYCURSOR - q - 1);
-			token->len = YYCURSOR - q - 1;
+			token->value = estrndup(q + 1, YYCURSOR - q - 2);
+			token->len = YYCURSOR - q - 2;
 			q = YYCURSOR;
 			return 0;
 		}
@@ -375,8 +425,7 @@ int phql_get_token(phql_scanner_state *s, phql_scanner_token *token) {
 
 		STRING {
 			token->opcode = PHQL_T_STRING;
-			token->value = estrndup(q, YYCURSOR - q - 1);
-			token->len = YYCURSOR - q - 1;
+			token->value = phql_unescape_string(q + 1, (unsigned int) (YYCURSOR - q - 2), &token->len);
 			q = YYCURSOR;
 			return 0;
 		}
@@ -403,8 +452,8 @@ int phql_get_token(phql_scanner_state *s, phql_scanner_token *token) {
 		EIDENTIFIER = '[' ([\\][\[]|[\\][\]]|PRINTABLE\[\[\]])* ']';
 		EIDENTIFIER {
 			token->opcode = PHQL_T_IDENTIFIER;
-			token->value = estrndup(q, YYCURSOR - q - 1);
-			token->len = YYCURSOR - q - 1;
+			token->value = estrndup(q + 1, YYCURSOR - q - 2);
+			token->len = YYCURSOR - q - 2;
 			q = YYCURSOR;
 			return 0;
 		}
@@ -494,28 +543,48 @@ int phql_get_token(phql_scanner_state *s, phql_scanner_token *token) {
 			return 0;
 		}
 
-		'@@' {
-			token->opcode = PHQL_T_TS_MATCHES;
+		"->>" {
+			token->opcode = PHQL_T_OP_JSON_GET_TEXT;
 			return 0;
 		}
 
-		"||" {
-			token->opcode = PHQL_T_TS_OR;
+		"->" {
+			token->opcode = PHQL_T_OP_JSON_GET;
 			return 0;
 		}
 
-		"&&" {
-			token->opcode = PHQL_T_TS_AND;
+		"#>>" {
+			token->opcode = PHQL_T_OP_JSON_PATH_TEXT;
 			return 0;
 		}
 
-		"!!" {
-			token->opcode = PHQL_T_TS_NEGATE;
+		"#>" {
+			token->opcode = PHQL_T_OP_JSON_PATH;
+			return 0;
+		}
+
+		"@@" {
+			token->opcode = PHQL_T_OP_MATCHES;
 			return 0;
 		}
 
 		"@>" {
-			token->opcode = PHQL_T_TS_CONTAINS_ANOTHER;
+			token->opcode = PHQL_T_OP_CONTAINS;
+			return 0;
+		}
+
+		"<@" {
+			token->opcode = PHQL_T_OP_CONTAINED;
+			return 0;
+		}
+
+		"&&" {
+			token->opcode = PHQL_T_OP_OVERLAPS;
+			return 0;
+		}
+
+		"||" {
+			token->opcode = PHQL_T_OP_CONCAT;
 			return 0;
 		}
 

@@ -10,7 +10,9 @@
 
 namespace Phalcon\Image;
 
-class Exception extends \Phalcon\Exception
+/**
+ * Exceptions thrown in Phalcon\Image will use this class
+ */
+class Exception extends \Exception
 {
-
 }
